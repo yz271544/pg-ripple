@@ -34,6 +34,7 @@ FROM rust:1-bookworm AS builder
 
 # Minimal build dependencies — pg_ripple_http uses only pure-Rust TLS (rustls)
 # and does not require libclang, PostgreSQL headers, or OpenSSL dev headers.
+RUN sed -i "s/deb.debian.org/mirrors.ustc.edu.cn/g" /etc/apt/sources.list.d/debian.sources
 RUN apt-get update -qq \
     && apt-get install -y --no-install-recommends \
        pkg-config \
@@ -53,6 +54,24 @@ COPY pg_ripple_http/ ./pg_ripple_http/
 # resolve the workspace and caches the pg_ripple_http dependency layer without
 # ever invoking pgrx, libclang, or PostgreSQL build tools.
 RUN mkdir -p src && printf '// workspace stub — not compiled in Dockerfile.http\n' > src/lib.rs
+
+RUN cat > /usr/local/cargo/config.toml <<EOF
+[source.crates-io]
+replace-with = 'aliyun'
+[source.aliyun]
+registry = "sparse+https://mirrors.aliyun.com/crates.io-index/"
+[source.ustc]
+registry = "https://mirrors.ustc.edu.cn/crates.io-index"
+[source.sjtu]
+registry = "https://mirrors.sjtug.sjtu.edu.cn/git/crates.io-index/"
+[source.tuna]
+registry = "https://mirrors.tuna.tsinghua.edu.cn/git/crates.io-index.git"
+[source.rustcc]
+registry = "https://code.aliyun.com/rustcc/crates.io-index.git"
+[http]
+timeout = 30
+check-revoke = false
+EOF
 
 # Pre-fetch dependencies in a separate layer so source edits don't bust the
 # cache for the long download step.
