@@ -1,5 +1,11 @@
 # §2.4 Validating Data Quality
 
+**Status**: Available since v0.3.0 (SHACL-01)  
+**Requires**: No external dependencies.  
+**SQL**: `pg_ripple.load_shacl_shapes()`, `pg_ripple.validate_shapes()`, `pg_ripple.list_shacl_violations()`  
+
+---
+
 ## What and Why
 
 Storing knowledge is only half the battle — you also need to ensure it is **correct**.
@@ -506,4 +512,4 @@ FROM jsonb_array_elements(
 
 ## Further reading
 
-- [Blog: SHACL Data Quality](../../blog/shacl-data-quality.md) — a deep dive into how SHACL shapes protect your data
+- [Blog: SHACL Data Quality](https://github.com/trickle-labs/pg-ripple/blob/main/blog/shacl-data-quality.md) — a deep dive into how SHACL shapes protect your data

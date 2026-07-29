@@ -1,5 +1,11 @@
 # §2.5 Reasoning and Inference
 
+**Status**: Available since v0.6.0 (RULE-01)  
+**Requires**: No external dependencies. Rule sets are compiled to SQL by the Datalog engine.  
+**SQL**: `pg_ripple.add_rule()`, `pg_ripple.run_inference()`, `pg_ripple.enable_builtin_rules()`  
+
+---
+
 ## What and Why
 
 Inference lets pg_ripple derive **new facts** from existing data using logical rules.
@@ -533,7 +539,7 @@ SELECT * FROM pg_ripple.rule_plan_cache_stats();
 
 ## Further reading
 
-- [Blog: Datalog Inside PostgreSQL](../../blog/datalog-inside-postgresql.md) — how the Datalog engine works under the hood
-- [Blog: Built-in Reasoning Rules Explained](../../blog/builtin-reasoning-rules-explained.md) — the RDFS and OWL RL rule sets
-- [Blog: Magic Sets for Goal-Directed Inference](../../blog/magic-sets-goal-directed.md) — how demand-driven evaluation speeds up queries
-- [Blog: Well-Founded Semantics](../../blog/well-founded-semantics.md) — handling negation in cyclic rules
+- [Blog: Datalog Inside PostgreSQL](https://github.com/trickle-labs/pg-ripple/blob/main/blog/datalog-inside-postgresql.md) — how the Datalog engine works under the hood
+- [Blog: Built-in Reasoning Rules Explained](https://github.com/trickle-labs/pg-ripple/blob/main/blog/builtin-reasoning-rules-explained.md) — the RDFS and OWL RL rule sets
+- [Blog: Magic Sets for Goal-Directed Inference](https://github.com/trickle-labs/pg-ripple/blob/main/blog/magic-sets-goal-directed.md) — how demand-driven evaluation speeds up queries
+- [Blog: Well-Founded Semantics](https://github.com/trickle-labs/pg-ripple/blob/main/blog/well-founded-semantics.md) — handling negation in cyclic rules

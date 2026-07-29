@@ -1,5 +1,10 @@
 # Live Views and Subscriptions
 
+**Status**: Live views available since v0.12.0; CDC subscriptions available since v0.42.0  
+**See also**: [Live SPARQL Subscriptions](live-subscriptions.md) · [CDC Subscriptions](cdc-subscriptions.md)  
+
+---
+
 Two features cover the *push* side of pg_ripple — getting data **out** as it changes, instead of polling for it.
 
 | Feature | Best for | Backed by |
@@ -164,5 +169,5 @@ The two compose: build a view of *what is currently true*, and a subscription of
 
 ## Further reading
 
-- [Blog: CONSTRUCT Views — Live Transformations](../../blog/construct-views-live-transformations.md) — incremental materialization of SPARQL views
-- [Blog: IVM with pg-trickle Integration](../../blog/ivm-pg-trickle-integration.md) — how pg_ripple keeps views up to date
+- [Blog: CONSTRUCT Views — Live Transformations](https://github.com/trickle-labs/pg-ripple/blob/main/blog/construct-views-live-transformations.md) — incremental materialization of SPARQL views
+- [Blog: IVM with pg-trickle Integration](https://github.com/trickle-labs/pg-ripple/blob/main/blog/ivm-pg-trickle-integration.md) — how pg_ripple keeps views up to date
