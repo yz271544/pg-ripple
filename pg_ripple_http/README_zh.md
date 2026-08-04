@@ -466,28 +466,4 @@ curl -X POST "http://localhost:7878/sparql?replica=ok" \
   -H "Content-Type: application/sparql-query" \
   -d "SELECT * WHERE { ?s ?p ?o } LIMIT 10"
 
-# POST (form-encoded)
 ```
-
-> **译注：** 原文此处（约第 470–473 行）存在损坏内容（连续的 `spacurl -X POST "http://localhost:7878/spacurl …` 字符串碎片），从 git 历史 `e9fb82ac`、`fedbc9a0` 等提交看就已经是这样，并非本次翻译造成。损坏段落疑似丢失了：
->
-> 1. 第三个 `POST (form-encoded)` 形式的 `curl` 示例
-> 2. 关于「当副本不可用时回退到主库并发出 `WARN` 级日志」的说明
-> 3. 关于「路由决策以 `DEBUG` 级别记录日志」的说明
->
-> 末尾两条原本应为：
->
-> ```
-> e replica is unavailable, the request falls back to the primary and a
->   `WARN`-leve  `WARN`-leve  `WARN`-lev Routing decisions are logged at `DEBUG` level.
-> - The `?replica=ok` parameter is silently ignored if `PG_RIPPLE_HTTP_REPLICA_DSN`
->   is not configured.
-> ```
->
-> 推测其原意为：
->
-> - ……副本不可用时，请求会回退到主库，并发出 `WARN` 级别的日志。
-> - 路由决策会以 `DEBUG` 级别记录日志。
-> - 如果未配置 `PG_RIPPLE_HTTP_REPLICA_DSN`，则 `?replica=ok` 参数会被静默忽略。
->
-> 建议根据上游 v0.120.0 原始 PR（#106）核对后再补齐。
