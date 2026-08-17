@@ -239,8 +239,7 @@ mod tests {
     #[pg_test]
     fn pg_test_sparql_filter_bound() {
         crate::bulk_load::load_ntriples(
-            "<https://example.org/s1> <https://example.org/p> <https://example.org/o1> .\n\
-             <https://example.org/s2> <https://example.org/p> <https://example.org/o2> .\n",
+            "<https://example.org/s1> <https://example.org/p> <https://example.org/o1> .\n             <https://example.org/s2> <https://example.org/p> <https://example.org/o2> .\n",
             false,
         );
         // Only one subject matches the binding of ?s to s1.
@@ -248,5 +247,99 @@ mod tests {
             "SELECT ?o WHERE { <https://example.org/s1> <https://example.org/p> ?o }",
         );
         assert_eq!(rows.len(), 1, "bound subject must restrict to one row");
+    }
+
+    /// Regression test for the "stale shared-memory encode cache" bug.
+    ///
+    /// Before the fix, the workflow
+    ///     DROP EXTENSION pg_ripple CASCADE;
+    ///     CREATE EXTENSION pg_ripple;
+    ///     SELECT pg_ripple.load_rdfxml_file('…');
+    /// produced a VP table full of dangling references: the dictionary
+    /// stayed empty because `dictionary::encode` short-circuited on a
+    /// shared-memory cache hit that pointed at a previously-allocated id,
+    /// never falling through to the SPI INSERT path that populates the
+    /// dictionary table.
+    ///
+    /// The fix calls `pre_load_safety_check()` (which clears the encode
+    /// cache + backend-local LRU) at the start of every `*_file` loader.
+    /// This test exercises the same path and asserts that the dictionary
+    /// is non-empty after a single `load_rdfxml_file` call.
+    #[pg_test]
+    fn pg_test_load_rdfxml_file_populates_dictionary() {
+        // 1) Empty the dictionary so we can detect repopulation.
+        Spi::run("TRUNCATE _pg_ripple.dictionary CASCADE").expect("truncate dict");
+
+        // 2) Pre-populate the shmem encode cache with a stale entry that
+        //    points at id 9999, which does NOT exist in the dictionary.
+        //    Without the safety net, the next dictionary::encode call
+        //    would return 9999 and the new row would silently miss the
+        //    dictionary table.
+        let stale_hash = xxhash_rust::xxh3::xxh3_128(b"stale-poison-key");
+        crate::shmem::encode_cache_insert(stale_hash, 9999);
+
+        // 3) Verify the cache is poisoned: the lookup returns 9999.
+        let looked_up = crate::shmem::encode_cache_lookup(stale_hash);
+        assert_eq!(looked_up, Some(9999), "stale cache entry should be visible");
+
+        // 4) Write a small RDF/XML file into the database cluster
+        //    directory (read_file_content requires the path to live under
+        //    data_directory, hence we resolve it via current_setting).
+        let data_dir: String = Spi::get_one("SELECT current_setting('data_directory')")
+            .expect("read data_directory")
+            .expect("data_directory is not NULL");
+        let path = std::path::PathBuf::from(&data_dir).join("pg_ripple_regress.owl");
+        std::fs::write(
+            &path,
+            b"<?xml version=\"1.0\"?>\n\
+              <rdf:RDF xmlns:rdf=\"http://www.w3.org/1999/02/22-rdf-syntax-ns#\"\
+                      xmlns:ex=\"https://example.org/\">\n\
+                <ex:Thing rdf:about=\"https://example.org/x\"/>\n\
+                <ex:Thing rdf:about=\"https://example.org/y\"/>\n\
+              </rdf:RDF>\n",
+        )
+        .expect("write RDF/XML fixture");
+
+        // 5) Allow the file path.  Set both the GUC and the local
+        //    session-level allowlist so the test works regardless of
+        //    what's in postgresql.conf.
+        Spi::run(&format!(
+            "SET pg_ripple.copy_rdf_allowed_paths = '{}'",
+            data_dir.replace('\'', "''")
+        ))
+        .expect("set copy_rdf_allowed_paths");
+
+        // 6) Load.  pre_load_safety_check() inside load_rdfxml_file
+        //    should drop the stale cache entry, so dictionary::encode
+        //    falls through to the SPI INSERT and creates fresh rows.
+        let count = crate::bulk_load::load_rdfxml_file(
+            path.to_str().expect("path is utf-8"),
+            false,
+        );
+        assert!(count >= 2, "expected at least 2 triples, got {count}");
+
+        // 7) The dictionary must now contain the IRIs we just loaded.
+        //    A non-empty dictionary is the actual success criterion.
+        let dict_rows: i64 = Spi::get_one("SELECT count(*) FROM _pg_ripple.dictionary")
+            .expect("count dict")
+            .expect("count dict is not NULL");
+        assert!(
+            dict_rows >= 3,
+            "dictionary should be populated with subject/predicate/object IRIs, \
+             got only {dict_rows} rows — the stale-cache bug is back"
+        );
+
+        // 8) The SPARQL engine must be able to read the loaded triples
+        //    back without emitting "dictionary entry missing" warnings.
+        let rows = crate::sparql::sparql(
+            "SELECT ?s WHERE { ?s <https://example.org/> ?o }",
+        );
+        assert!(
+            !rows.is_empty(),
+            "SPARQL should return the freshly loaded triples"
+        );
+
+        // 9) Cleanup.
+        let _ = std::fs::remove_file(&path);
     }
 }
