@@ -9,7 +9,32 @@ Versions correspond to the milestones in [ROADMAP.md](ROADMAP.md).
 
 ## [Unreleased]
 
+### Added
+
+- **`pg_ripple.reload_ontologies(paths text[], allowed_dir text DEFAULT NULL)
+  → BIGINT`** — bulk-loads a list of RDF/Turtle/N-Triples/RDF/XML files in one
+  call. Internally flushes the shared-memory encode cache, dispatches each
+  path to the right `load_*_file` based on file extension (`.ttl`, `.nt`,
+  `.nq`, `.trig`, `.rdf`, `.xml`, `.owl` all map to the RDF/XML parser; `.ttl`
+  → Turtle), runs `ANALYZE` on `_pg_ripple.vp_rare` and any promoted VP
+  tables, and returns the total triple count. Failures on individual files
+  are demoted to WARNING so a single bad file does not abort the whole
+  batch.  **ONT-RELOAD-01 (v0.129.0).**
+
 ### Fixed
+
+- **Stale shared-memory encode cache after `DROP EXTENSION` +
+  `CREATE EXTENSION`** — every `pg_ripple.load_*_file()` entry point now
+  invokes `pre_load_safety_check()`, which clears the postmaster-level
+  shmem encode cache (`pg_ripple.dictionary_cache_size`) and the
+  backend-local dictionary LRU before doing any work. Previously, a
+  freshly-created extension would load triples whose dictionary ids
+  came from cache hits pointing at ids from the previous extension
+  session — leaving `_pg_ripple.dictionary` empty while VP tables were
+  populated, which broke every subsequent SPARQL query with "dictionary
+  entry missing" warnings. Regression test added in
+  `src/lib_tests.rs::pg_test_load_rdfxml_file_populates_dictionary`.
+  **ONT-STALE-01 (v0.129.0).**
 
 - **CI: CloudNativePG extension image publishing** — Added `docker-cnpg` job to
   release workflow to build and publish the extension volume image with the
