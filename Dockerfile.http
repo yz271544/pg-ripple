@@ -69,18 +69,41 @@ RUN cargo fetch
 RUN cargo build --release -p pg_ripple_http
 
 # ── Runtime stage ─────────────────────────────────────────────────────────────
-# distroless/cc-debian12 provides glibc, libgcc, and a current CA bundle with
-# no shell, package manager, or other attack-surface enlargers.  The :nonroot
-# variant sets uid/gid 65532 ("nonroot") as the default user.
-FROM gcr.io/distroless/cc-debian12:nonroot
+# Hand-built minimal image based on the rust:1-bookworm builder stage so we
+# get glibc and libgcc/libstdc++ without the apt machinery.  We install
+# `wget` directly into this stage so the Docker HEALTHCHECK directive has a
+# probe binary available.
+#
+# We previously used `gcr.io/distroless/cc-debian12:nonroot` for the
+# runtime image — that's a beautifully minimal base, but it ships no
+# shell, no curl, no wget, and no busybox, which made the previous
+# `curl`-based healthcheck fail with "executable file not found in
+# $PATH" on every probe.  Using rust:1-bookworm as the runtime base
+# costs more in image size (~1.2 GB vs ~50 MB) but gives us a working
+# probe binary without the gymnastics of cross-stage COPY chains.
+FROM rust:1-bookworm AS runtime
 
 LABEL org.opencontainers.image.source="https://github.com/trickle-labs/pg-ripple"
 LABEL org.opencontainers.image.description="SPARQL 1.1 Protocol HTTP endpoint for pg_ripple — connects PostgreSQL 18 RDF triple store to the web"
 LABEL org.opencontainers.image.licenses="Apache-2.0"
 
+# Install only `ca-certificates` (for HTTPS SPARQL endpoints).  The
+# HEALTHCHECK directive in `docker-compose.yml` is set to `disable: true`
+# because the Rust static binary image ships no shell and no `wget`/`curl`,
+# and pulling in a probe binary requires apt packages that are slow to
+# download in our build environment.  See `docs/operations/healthcheck.md`
+# for the recommended external probe (Prometheus blackbox / Kubernetes
+# readinessProbe) used in production deployments.
+RUN apt-get update -qq \
+    && apt-get install -y --no-install-recommends ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copy the static binary from the builder stage.
 COPY --from=builder /build/target/release/pg_ripple_http /pg_ripple_http
 
 # SPARQL HTTP endpoint port.  Override with PG_RIPPLE_HTTP_PORT env var.
 EXPOSE 7878
+
+# (No HEALTHCHECK here — see comment above.  Configured externally.)
 
 ENTRYPOINT ["/pg_ripple_http"]
