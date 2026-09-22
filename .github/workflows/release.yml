@@ -18,7 +18,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6
+        uses: actions/checkout@v6.0.2  # v6
 
       - name: Verify COMPATIBLE_EXTENSION_MIN is within 1 minor version
         run: |
@@ -68,15 +68,15 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6
+        uses: actions/checkout@v6.0.2  # v6
 
       - name: Install Rust (stable)
-        uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8  # stable
+        uses: dtolnay/rust-toolchain@v1  # stable
         with:
           components: rustfmt, clippy
 
       - name: Cache Cargo registry
-        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae  # v5
+        uses: actions/cache@v5.0.5  # v5
         with:
           path: |
             ~/.cargo/registry
@@ -86,7 +86,7 @@ jobs:
           restore-keys: ${{ runner.os }}-cargo-
 
       - name: Cache cargo-pgrx binary
-        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae  # v5
+        uses: actions/cache@v5.0.5  # v5
         with:
           path: ~/.cargo/bin/cargo-pgrx
           key: ${{ runner.os }}-cargo-pgrx-${{ env.PGRX_VERSION }}
@@ -134,13 +134,13 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6
+        uses: actions/checkout@v6.0.2  # v6
 
       - name: Install Rust (stable)
-        uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8  # stable
+        uses: dtolnay/rust-toolchain@v1  # stable
 
       - name: Cache Cargo registry
-        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae  # v5
+        uses: actions/cache@v5.0.5  # v5
         with:
           path: |
             ~/.cargo/registry
@@ -150,7 +150,7 @@ jobs:
           restore-keys: ${{ runner.os }}-cargo-
 
       - name: Cache cargo-pgrx binary
-        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae  # v5
+        uses: actions/cache@v5.0.5  # v5
         with:
           path: ~/.cargo/bin/cargo-pgrx
           key: ${{ runner.os }}-cargo-pgrx-${{ env.PGRX_VERSION }}
@@ -206,7 +206,7 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6
+        uses: actions/checkout@v6.0.2  # v6
 
       - name: Setup pgrx environment
         uses: ./.github/actions/setup-pgrx
@@ -288,7 +288,7 @@ jobs:
           Write-Host "Archive: ${archiveName}.zip"
 
       - name: Upload release artifact
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7
+        uses: actions/upload-artifact@v7  # v7
         with:
           name: release-${{ matrix.artifact_suffix }}
           path: dist/*.${{ matrix.archive_ext }}
@@ -306,7 +306,7 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6
+        uses: actions/checkout@v6.0.2  # v6
 
       - name: Extract version from tag
         id: version
@@ -448,7 +448,7 @@ jobs:
           bash scripts/generate_release_evidence.sh "$VERSION" || true
 
       - name: Upload release evidence artifact
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7
+        uses: actions/upload-artifact@v7  # v7
         if: always()
         with:
           name: release-evidence-${{ steps.version.outputs.version }}
@@ -466,7 +466,7 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6
+        uses: actions/checkout@v6.0.2  # v6
 
       - name: Extract version from tag
         id: version
@@ -561,7 +561,7 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6
+        uses: actions/checkout@v6.0.2  # v6
 
       - name: Log in to GitHub Container Registry
         uses: docker/login-action@4907a6ddec9925e35a0a9e82d7399ccc52663121  # v4
@@ -639,7 +639,7 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6
+        uses: actions/checkout@v6.0.2  # v6
 
       - name: Extract version from tag
         id: version
@@ -722,10 +722,10 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6
+        uses: actions/checkout@v6.0.2  # v6
 
       - name: Install Rust (stable)
-        uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8  # stable
+        uses: dtolnay/rust-toolchain@v1  # stable
 
       - name: Publish pg_ripple_http
         # Only publish when a CARGO_REGISTRY_TOKEN secret is configured.

@@ -34,15 +34,15 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6
+        uses: actions/checkout@v6.0.2  # v6
 
       - name: Install Rust (stable)
-        uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8  # stable
+        uses: dtolnay/rust-toolchain@v1  # stable
         with:
           components: rustfmt, clippy
 
       - name: Cache Cargo registry
-        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae  # v5
+        uses: actions/cache@v5.0.5  # v5
         with:
           path: |
             ~/.cargo/registry
@@ -55,7 +55,7 @@ jobs:
         run: rm -rf target/test-pgdata
 
       - name: Cache cargo-pgrx binary
-        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae  # v5
+        uses: actions/cache@v5.0.5  # v5
         with:
           path: ~/.cargo/bin/cargo-pgrx
           key: ${{ runner.os }}-cargo-pgrx-${{ env.PGRX_VERSION }}
@@ -168,13 +168,13 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6
+        uses: actions/checkout@v6.0.2  # v6
 
       - name: Install Rust (stable)
-        uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8  # stable
+        uses: dtolnay/rust-toolchain@v1  # stable
 
       - name: Cache Cargo registry
-        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae  # v5
+        uses: actions/cache@v5.0.5  # v5
         with:
           path: |
             ~/.cargo/registry
@@ -184,7 +184,7 @@ jobs:
           restore-keys: ${{ runner.os }}-cargo-
 
       - name: Cache cargo-pgrx binary
-        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae  # v5
+        uses: actions/cache@v5.0.5  # v5
         with:
           path: ~/.cargo/bin/cargo-pgrx
           key: ${{ runner.os }}-cargo-pgrx-${{ env.PGRX_VERSION }}
@@ -245,7 +245,7 @@ jobs:
 
       - name: Upload regression results
         if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7
+        uses: actions/upload-artifact@v7  # v7
         with:
           name: pg_regress_results
           path: |
@@ -260,13 +260,13 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6
+        uses: actions/checkout@v6.0.2  # v6
 
       - name: Install Rust (stable)
-        uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8  # stable
+        uses: dtolnay/rust-toolchain@v1  # stable
 
       - name: Cache Cargo registry
-        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae  # v5
+        uses: actions/cache@v5.0.5  # v5
         with:
           path: |
             ~/.cargo/registry
@@ -276,7 +276,7 @@ jobs:
           restore-keys: ${{ runner.os }}-cargo-
 
       - name: Cache cargo-pgrx binary
-        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae  # v5
+        uses: actions/cache@v5.0.5  # v5
         with:
           path: ~/.cargo/bin/cargo-pgrx
           key: ${{ runner.os }}-cargo-pgrx-${{ env.PGRX_VERSION }}
@@ -322,13 +322,13 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6
+        uses: actions/checkout@v6.0.2  # v6
 
       - name: Install Rust (stable)
-        uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8  # stable
+        uses: dtolnay/rust-toolchain@v1  # stable
 
       - name: Cache Cargo registry
-        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae  # v5
+        uses: actions/cache@v5.0.5  # v5
         with:
           path: |
             ~/.cargo/registry
@@ -338,19 +338,19 @@ jobs:
           restore-keys: ${{ runner.os }}-cargo-
 
       - name: Cache cargo-pgrx binary
-        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae  # v5
+        uses: actions/cache@v5.0.5  # v5
         with:
           path: ~/.cargo/bin/cargo-pgrx
           key: ${{ runner.os }}-cargo-pgrx-${{ env.PGRX_VERSION }}
 
       - name: Cache pgrx PostgreSQL build
-        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae  # v5
+        uses: actions/cache@v5.0.5  # v5
         with:
           path: ~/.pgrx
           key: ${{ runner.os }}-pgrx-pg18-${{ env.PGRX_VERSION }}
 
       - name: Cache W3C test data
-        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae  # v5
+        uses: actions/cache@v5.0.5  # v5
         id: w3c-cache
         with:
           path: tests/w3c/data
@@ -410,13 +410,13 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6
+        uses: actions/checkout@v6.0.2  # v6
 
       - name: Install Rust (stable)
-        uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8  # stable
+        uses: dtolnay/rust-toolchain@v1  # stable
 
       - name: Cache Cargo registry
-        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae  # v5
+        uses: actions/cache@v5.0.5  # v5
         with:
           path: |
             ~/.cargo/registry
@@ -426,19 +426,19 @@ jobs:
           restore-keys: ${{ runner.os }}-cargo-
 
       - name: Cache cargo-pgrx binary
-        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae  # v5
+        uses: actions/cache@v5.0.5  # v5
         with:
           path: ~/.cargo/bin/cargo-pgrx
           key: ${{ runner.os }}-cargo-pgrx-${{ env.PGRX_VERSION }}
 
       - name: Cache pgrx PostgreSQL build
-        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae  # v5
+        uses: actions/cache@v5.0.5  # v5
         with:
           path: ~/.pgrx
           key: ${{ runner.os }}-pgrx-pg18-${{ env.PGRX_VERSION }}
 
       - name: Cache W3C test data
-        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae  # v5
+        uses: actions/cache@v5.0.5  # v5
         id: w3c-cache
         with:
           path: tests/w3c/data
@@ -489,7 +489,7 @@ jobs:
 
       - name: Upload W3C test report
         if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7
+        uses: actions/upload-artifact@v7  # v7
         with:
           name: w3c_report
           path: tests/w3c/report.json
@@ -507,13 +507,13 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6
+        uses: actions/checkout@v6.0.2  # v6
 
       - name: Install Rust (stable)
-        uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8  # stable
+        uses: dtolnay/rust-toolchain@v1  # stable
 
       - name: Cache Cargo registry
-        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae  # v5
+        uses: actions/cache@v5.0.5  # v5
         with:
           path: |
             ~/.cargo/registry
@@ -523,19 +523,19 @@ jobs:
           restore-keys: ${{ runner.os }}-cargo-
 
       - name: Cache cargo-pgrx binary
-        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae  # v5
+        uses: actions/cache@v5.0.5  # v5
         with:
           path: ~/.cargo/bin/cargo-pgrx
           key: ${{ runner.os }}-cargo-pgrx-${{ env.PGRX_VERSION }}
 
       - name: Cache pgrx PostgreSQL build
-        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae  # v5
+        uses: actions/cache@v5.0.5  # v5
         with:
           path: ~/.pgrx
           key: ${{ runner.os }}-pgrx-pg18-${{ env.PGRX_VERSION }}
 
       - name: Cache Jena test data
-        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae  # v5
+        uses: actions/cache@v5.0.5  # v5
         id: jena-cache
         with:
           path: tests/jena/data
@@ -586,7 +586,7 @@ jobs:
 
       - name: Upload Jena conformance report
         if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7
+        uses: actions/upload-artifact@v7  # v7
         with:
           name: jena_report
           path: tests/conformance/report.json
@@ -618,13 +618,13 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6
+        uses: actions/checkout@v6.0.2  # v6
 
       - name: Install Rust (stable)
-        uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8  # stable
+        uses: dtolnay/rust-toolchain@v1  # stable
 
       - name: Cache Cargo registry
-        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae  # v5
+        uses: actions/cache@v5.0.5  # v5
         with:
           path: |
             ~/.cargo/registry
@@ -634,7 +634,7 @@ jobs:
           restore-keys: ${{ runner.os }}-cargo-
 
       - name: Cache cargo-pgrx binary
-        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae  # v5
+        uses: actions/cache@v5.0.5  # v5
         with:
           path: ~/.cargo/bin/cargo-pgrx
           key: ${{ runner.os }}-cargo-pgrx-${{ env.PGRX_VERSION }}
@@ -680,7 +680,7 @@ jobs:
 
       - name: Upload WatDiv benchmark report
         if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7
+        uses: actions/upload-artifact@v7  # v7
         with:
           name: watdiv_report
           path: tests/conformance/report.json
@@ -697,13 +697,13 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6
+        uses: actions/checkout@v6.0.2  # v6
 
       - name: Install Rust (stable)
-        uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8  # stable
+        uses: dtolnay/rust-toolchain@v1  # stable
 
       - name: Cache Cargo registry
-        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae  # v5
+        uses: actions/cache@v5.0.5  # v5
         with:
           path: |
             ~/.cargo/registry
@@ -713,7 +713,7 @@ jobs:
           restore-keys: ${{ runner.os }}-cargo-
 
       - name: Cache cargo-pgrx binary
-        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae  # v5
+        uses: actions/cache@v5.0.5  # v5
         with:
           path: ~/.cargo/bin/cargo-pgrx
           key: ${{ runner.os }}-cargo-pgrx-${{ env.PGRX_VERSION }}
@@ -769,13 +769,13 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6
+        uses: actions/checkout@v6.0.2  # v6
 
       - name: Install Rust (stable)
-        uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8  # stable
+        uses: dtolnay/rust-toolchain@v1  # stable
 
       - name: Cache Cargo registry
-        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae  # v5
+        uses: actions/cache@v5.0.5  # v5
         with:
           path: |
             ~/.cargo/registry
@@ -785,7 +785,7 @@ jobs:
           restore-keys: ${{ runner.os }}-cargo-
 
       - name: Cache cargo-pgrx binary
-        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae  # v5
+        uses: actions/cache@v5.0.5  # v5
         with:
           path: ~/.cargo/bin/cargo-pgrx
           key: ${{ runner.os }}-cargo-pgrx-${{ env.PGRX_VERSION }}
@@ -827,13 +827,13 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6
+        uses: actions/checkout@v6.0.2  # v6
 
       - name: Install Rust (stable)
-        uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8  # stable
+        uses: dtolnay/rust-toolchain@v1  # stable
 
       - name: Cache Cargo registry
-        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae  # v5
+        uses: actions/cache@v5.0.5  # v5
         with:
           path: |
             ~/.cargo/registry
@@ -843,19 +843,19 @@ jobs:
           restore-keys: ${{ runner.os }}-cargo-
 
       - name: Cache cargo-pgrx binary
-        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae  # v5
+        uses: actions/cache@v5.0.5  # v5
         with:
           path: ~/.cargo/bin/cargo-pgrx
           key: ${{ runner.os }}-cargo-pgrx-${{ env.PGRX_VERSION }}
 
       - name: Cache pgrx PostgreSQL build
-        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae  # v5
+        uses: actions/cache@v5.0.5  # v5
         with:
           path: ~/.pgrx
           key: ${{ runner.os }}-pgrx-pg18-${{ env.PGRX_VERSION }}
 
       - name: Cache OWL 2 RL test data
-        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae  # v5
+        uses: actions/cache@v5.0.5  # v5
         id: owl2rl-cache
         with:
           path: tests/owl2rl/data
@@ -930,13 +930,13 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6
+        uses: actions/checkout@v6.0.2  # v6
 
       - name: Install Rust (stable)
-        uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8  # stable
+        uses: dtolnay/rust-toolchain@v1  # stable
 
       - name: Cache Cargo registry
-        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae  # v5
+        uses: actions/cache@v5.0.5  # v5
         with:
           path: |
             ~/.cargo/registry
@@ -993,13 +993,13 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6
+        uses: actions/checkout@v6.0.2  # v6
 
       - name: Install Rust (stable)
-        uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8  # stable
+        uses: dtolnay/rust-toolchain@v1  # stable
 
       - name: Cache Cargo registry
-        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae  # v5
+        uses: actions/cache@v5.0.5  # v5
         with:
           path: |
             ~/.cargo/registry
@@ -1009,7 +1009,7 @@ jobs:
           restore-keys: ${{ runner.os }}-cargo-
 
       - name: Cache cargo-pgrx binary
-        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae  # v5
+        uses: actions/cache@v5.0.5  # v5
         with:
           path: ~/.cargo/bin/cargo-pgrx
           key: ${{ runner.os }}-cargo-pgrx-${{ env.PGRX_VERSION }}
@@ -1063,13 +1063,13 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6
+        uses: actions/checkout@v6.0.2  # v6
 
       - name: Install Rust (stable)
-        uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8  # stable
+        uses: dtolnay/rust-toolchain@v1  # stable
 
       - name: Cache Cargo registry
-        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae  # v5
+        uses: actions/cache@v5.0.5  # v5
         with:
           path: |
             ~/.cargo/registry
@@ -1079,7 +1079,7 @@ jobs:
           restore-keys: ${{ runner.os }}-cargo-
 
       - name: Cache cargo-pgrx binary
-        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae  # v5
+        uses: actions/cache@v5.0.5  # v5
         with:
           path: ~/.cargo/bin/cargo-pgrx
           key: ${{ runner.os }}-cargo-pgrx-${{ env.PGRX_VERSION }}
@@ -1119,13 +1119,13 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6
+        uses: actions/checkout@v6.0.2  # v6
 
       - name: Install Rust (stable)
-        uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8  # stable
+        uses: dtolnay/rust-toolchain@v1  # stable
 
       - name: Cache Cargo registry
-        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae  # v5
+        uses: actions/cache@v5.0.5  # v5
         with:
           path: |
             ~/.cargo/registry
@@ -1135,19 +1135,19 @@ jobs:
           restore-keys: ${{ runner.os }}-cargo-
 
       - name: Cache cargo-pgrx binary
-        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae  # v5
+        uses: actions/cache@v5.0.5  # v5
         with:
           path: ~/.cargo/bin/cargo-pgrx
           key: ${{ runner.os }}-cargo-pgrx-${{ env.PGRX_VERSION }}
 
       - name: Cache pgrx PostgreSQL build
-        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae  # v5
+        uses: actions/cache@v5.0.5  # v5
         with:
           path: ~/.pgrx
           key: ${{ runner.os }}-pgrx-pg18-${{ env.PGRX_VERSION }}
 
       - name: Cache BSBM data
-        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae  # v5
+        uses: actions/cache@v5.0.5  # v5
         id: bsbm-cache
         with:
           path: benchmarks/bsbm/data
@@ -1233,7 +1233,7 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6
+      - uses: actions/checkout@v6.0.2  # v6
       - name: Check for unsafe dynamic SQL patterns
         run: bash scripts/check_no_string_format_in_sql.sh
 
@@ -1243,7 +1243,7 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6
+      - uses: actions/checkout@v6.0.2  # v6
       - name: Assert docker-compose image tag matches Cargo.toml version
         run: |
           CARGO_VER=$(grep '^version' Cargo.toml | head -1 | sed 's/.*"\(.*\)".*/\1/')
@@ -1261,7 +1261,7 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6
+      - uses: actions/checkout@v6.0.2  # v6
       - name: Check all PT error codes are documented
         run: bash scripts/check_pt_codes.sh
 
@@ -1270,7 +1270,7 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6
+      - uses: actions/checkout@v6.0.2  # v6
       - name: Check migration script headers
         run: bash scripts/check_migration_headers.sh
 
@@ -1279,8 +1279,8 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6
-      - uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8  # stable
+      - uses: actions/checkout@v6.0.2  # v6
+      - uses: dtolnay/rust-toolchain@v1  # stable
       - name: Check for duplicate direct dependencies (advisory)
         run: |
           cargo tree --duplicates 2>&1 | tee /tmp/duplicates.txt || true
@@ -1297,7 +1297,7 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6
+      - uses: actions/checkout@v6.0.2  # v6
       - name: Check version consistency
         run: |
           set -euo pipefail
@@ -1341,8 +1341,8 @@ jobs:
     name: Lint - SPDX licence compliance (v0.51.0)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6
-      - uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8  # stable
+      - uses: actions/checkout@v6.0.2  # v6
+      - uses: dtolnay/rust-toolchain@v1  # stable
       - name: Install cargo-license
         run: cargo install cargo-license --locked
       - name: Check all dependencies use allowed licences
@@ -1373,7 +1373,7 @@ jobs:
     name: Lint — CHANGELOG format and BREAKING tags (v0.83.0)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6
+      - uses: actions/checkout@v6.0.2  # v6
       - name: Validate CHANGELOG.md headings and BREAKING tags
         run: |
           python3 - <<'EOF'
@@ -1421,7 +1421,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 50  # increased from 20: pgrx build + pg18 install takes 25-40 min
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6
+      - uses: actions/checkout@v6.0.2  # v6
 
       - name: Install system dependencies
         run: |
@@ -1439,10 +1439,10 @@ jobs:
             /usr/lib/postgresql/18/lib
 
       - name: Set up Rust toolchain
-        uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8  # stable
+        uses: dtolnay/rust-toolchain@v1  # stable
 
       - name: Cache cargo registry
-        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae  # v5
+        uses: actions/cache@v5.0.5  # v5
         with:
           path: |
             ~/.cargo/registry
@@ -1512,7 +1512,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 50  # increased from 25: pgrx build + pg18 install takes 25-40 min
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6
+      - uses: actions/checkout@v6.0.2  # v6
 
       - name: Install system dependencies
         run: |
@@ -1530,10 +1530,10 @@ jobs:
             /usr/lib/postgresql/18/lib
 
       - name: Set up Rust toolchain
-        uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8  # stable
+        uses: dtolnay/rust-toolchain@v1  # stable
 
       - name: Cache cargo registry
-        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae  # v5
+        uses: actions/cache@v5.0.5  # v5
         with:
           path: |
             ~/.cargo/registry
@@ -1606,7 +1606,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6
+      - uses: actions/checkout@v6.0.2  # v6
 
       - name: Validate roadmap Released status
         run: |
@@ -1623,7 +1623,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6
+      - uses: actions/checkout@v6.0.2  # v6
 
       - name: Install system dependencies
         run: |
@@ -1641,10 +1641,10 @@ jobs:
             /usr/lib/postgresql/18/lib
 
       - name: Set up Rust toolchain
-        uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8  # stable
+        uses: dtolnay/rust-toolchain@v1  # stable
 
       - name: Cache cargo registry
-        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae  # v5
+        uses: actions/cache@v5.0.5  # v5
         with:
           path: |
             ~/.cargo/registry
@@ -1701,7 +1701,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 25
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6
+      - uses: actions/checkout@v6.0.2  # v6
 
       - name: Install system dependencies
         run: |
@@ -1719,10 +1719,10 @@ jobs:
             /usr/lib/postgresql/18/lib
 
       - name: Set up Rust toolchain
-        uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8  # stable
+        uses: dtolnay/rust-toolchain@v1  # stable
 
       - name: Cache cargo registry
-        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae  # v5
+        uses: actions/cache@v5.0.5  # v5
         with:
           path: |
             ~/.cargo/registry
@@ -1789,7 +1789,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6
+        uses: actions/checkout@v6.0.2  # v6
 
       - name: Check no src/**/*.rs file exceeds 1,000 lines
         run: |
@@ -1816,7 +1816,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6
+        uses: actions/checkout@v6.0.2  # v6
 
       - name: Check unwrap/expect density
         run: |
@@ -1844,10 +1844,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6
+        uses: actions/checkout@v6.0.2  # v6
 
       - name: Install Rust stable
-        uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8  # stable
+        uses: dtolnay/rust-toolchain@v1  # stable
         with:
           toolchain: stable
 
@@ -1884,7 +1884,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6
+        uses: actions/checkout@v6.0.2  # v6
 
       - name: Check for backup/swap files
         run: |
@@ -1902,7 +1902,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6
+        uses: actions/checkout@v6.0.2  # v6
 
       - name: Validate openapi.yaml is non-empty and parseable YAML
         run: |
