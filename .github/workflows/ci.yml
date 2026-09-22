@@ -175,8 +175,12 @@ jobs:
           # pgrx delegates initdb/postgres to the requested system user.  The
           # Gitea Ubuntu job image starts steps as root, while PostgreSQL
           # refuses to initialise a cluster as root.
-          sudo install -d -o postgres -g postgres target/test-pgdata
-          cargo pgrx test pg18 --runas postgres --pgdata target/test-pgdata
+          # Use an absolute path: pgrx changes directory while running initdb,
+          # so a relative --pgdata path would be resolved twice and pg_ctl
+          # would later see a non-cluster directory.
+          PGTESTDATA="${GITHUB_WORKSPACE}/target/test-pgdata"
+          sudo install -d -o postgres -g postgres "${PGTESTDATA}"
+          cargo pgrx test pg18 --runas postgres --pgdata "${PGTESTDATA}"
 
       # L15-09 (v0.97.0): cargo doc missing-documentation gate.
       # Enforce that all public items have rustdoc comments (M15-15/v0.96.0 pass).
