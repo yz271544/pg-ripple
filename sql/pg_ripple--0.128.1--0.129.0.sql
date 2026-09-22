@@ -91,3 +91,70 @@ COMMENT ON FUNCTION _pg_ripple.json_writeback_enqueue_fn() IS
     'Trigger function that enqueues VP delta/vp_rare/tombstone changes into '
     'json_writeback_queue (v0.128.0 JSON-WRITEBACK-01; v0.129.0 C18-01 adds '
     'vp_rare predicate filtering and tombstone-table support)';
+
+-- ONT-RELOAD-01 / ONT-STALE-01: batch ontology reload helper. The Rust
+-- load_*_file entry points also clear the shared and backend-local encode
+-- caches before reading each file.
+CREATE OR REPLACE FUNCTION pg_ripple.reload_ontologies(
+    paths        text[],
+    allowed_dir  text DEFAULT NULL
+) RETURNS bigint
+LANGUAGE plpgsql
+VOLATILE
+AS $$
+DECLARE
+    p          text;
+    total      bigint := 0;
+    loaded     bigint;
+    file_ext   text;
+    error_msg  text;
+BEGIN
+    IF paths IS NULL OR array_length(paths, 1) IS NULL THEN
+        RAISE EXCEPTION 'pg_ripple.reload_ontologies: paths array is empty'
+            USING ERRCODE = '22023';
+    END IF;
+
+    IF allowed_dir IS NOT NULL THEN
+        EXECUTE format('SET LOCAL pg_ripple.copy_rdf_allowed_paths = %L',
+                       allowed_dir);
+    END IF;
+
+    PERFORM pg_ripple.flush_encode_cache();
+
+    FOREACH p IN ARRAY paths LOOP
+        file_ext := lower(regexp_replace(p, '^.*\.(\w+)$', '\1'));
+
+        BEGIN
+            loaded := CASE file_ext
+                WHEN 'ttl'  THEN pg_ripple.load_turtle_file(p, false)
+                WHEN 'nt'   THEN pg_ripple.load_ntriples_file(p, false)
+                WHEN 'nq'   THEN pg_ripple.load_nquads_file(p, false)
+                WHEN 'trig' THEN pg_ripple.load_trig_file(p, false)
+                WHEN 'rdf'  THEN pg_ripple.load_rdfxml_file(p, false)
+                WHEN 'xml'  THEN pg_ripple.load_rdfxml_file(p, false)
+                WHEN 'owl'  THEN pg_ripple.load_rdfxml_file(p, false)
+                ELSE pg_ripple.load_rdfxml_file(p, false)
+            END;
+            total := total + loaded;
+        EXCEPTION WHEN OTHERS THEN
+            GET STACKED DIAGNOSTICS error_msg = MESSAGE_TEXT;
+            RAISE WARNING 'pg_ripple.reload_ontologies: failed to load %: %',
+                          p, error_msg;
+        END;
+    END LOOP;
+
+    ANALYZE _pg_ripple.vp_rare;
+    FOR p IN
+        SELECT format('_pg_ripple.vp_%s', id)::regclass
+        FROM _pg_ripple.predicates
+        WHERE table_oid IS NOT NULL
+    LOOP
+        EXECUTE 'ANALYZE ' || p;
+    END LOOP;
+
+    RETURN total;
+END;
+$$;
+
+COMMENT ON FUNCTION pg_ripple.reload_ontologies(text[], text) IS
+'Bulk-load a list of RDF/Turtle/N-Triples/RDF/XML files in one call. ONT-RELOAD-01 (v0.129.0).';

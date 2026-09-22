@@ -9,6 +9,24 @@ Versions correspond to the milestones in [ROADMAP.md](ROADMAP.md).
 
 ## [Unreleased]
 
+### Added
+
+- Added `pg_ripple.reload_ontologies(paths text[], allowed_dir text DEFAULT NULL)`
+  to load a batch of Turtle, N-Triples, N-Quads, TriG, RDF/XML, or OWL files,
+  refresh planner statistics, and continue past individual file failures with
+  warnings.
+
+### Fixed
+
+- Clear the shared and backend-local dictionary encode caches before every
+  server-side `load_*_file()` operation, preventing stale identifiers after a
+  `DROP EXTENSION` / `CREATE EXTENSION` cycle.
+- Recognize angle-bracketed HTTP(S) IRIs in legacy SPARQL JSON and XML result
+  formatting instead of incorrectly returning them as literals.
+- Use a Debian runtime for the standalone HTTP image so CA certificates and
+  external health-probe tooling can be installed while retaining a non-root
+  runtime user.
+
 ---
 
 ## [0.136.0] — 2026-08-30 — External audit readiness and hardened candidate

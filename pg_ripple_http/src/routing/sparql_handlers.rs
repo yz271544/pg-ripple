@@ -437,15 +437,38 @@ pub(crate) fn format_select_json(results: &[serde_json::Value]) -> Response {
                 for (key, val) in obj {
                     if let Some(s) = val.as_str() {
                         let mut term = serde_json::Map::new();
+                        // Classify the value into a W3C SPARQL JSON term type:
+                        //   * `uri`    — http://... or https://... (optionally
+                        //                 wrapped in <...> as emitted by pg_ripple's
+                        //                 N-Triples serialisation)
+                        //   * `bnode`  — `_:label`
+                        //   * `literal`— anything else, including angle-bracketed
+                        //                 values whose inner content is not a known
+                        //                 IRI scheme (kept as literal to avoid
+                        //                 silently mis-classifying unknown schemes).
                         if s.starts_with("http://") || s.starts_with("https://") {
                             term.insert("type".to_owned(), "uri".into());
                             term.insert("value".to_owned(), s.into());
-                        } else if s.starts_with("_:") {
+                        } else if s.starts_with('_') && s.len() > 1 && s.as_bytes()[1] == b':' {
+                            // `_:` prefix means a labelled blank node.
                             term.insert("type".to_owned(), "bnode".into());
                             term.insert(
                                 "value".to_owned(),
                                 s.strip_prefix("_:").unwrap_or(s).into(),
                             );
+                        } else if s.starts_with('<') && s.ends_with('>') {
+                            // Unwrap angle-bracketed IRIs from pg_ripple's N-Triples
+                            // output.  Only classify as `uri` if the inner content
+                            // looks like an http(s) IRI; otherwise keep the wrapped
+                            // value as a literal.
+                            let inner = &s[1..s.len() - 1];
+                            if inner.starts_with("http://") || inner.starts_with("https://") {
+                                term.insert("type".to_owned(), "uri".into());
+                                term.insert("value".to_owned(), inner.to_owned().into());
+                            } else {
+                                term.insert("type".to_owned(), "literal".into());
+                                term.insert("value".to_owned(), s.into());
+                            }
                         } else {
                             term.insert("type".to_owned(), "literal".into());
                             term.insert("value".to_owned(), s.into());
@@ -517,7 +540,15 @@ pub(crate) fn format_select_xml(results: &[serde_json::Value]) -> Response {
             for (key, val) in obj {
                 xml.push_str(&format!("      <binding name=\"{key}\">"));
                 if let Some(s) = val.as_str() {
-                    if s.starts_with("http://") || s.starts_with("https://") {
+                    // See `format_select_json` for the angle-bracket handling rationale.
+                    if s.starts_with('<') && s.ends_with('>') {
+                        let inner = &s[1..s.len() - 1];
+                        if inner.starts_with("http://") || inner.starts_with("https://") {
+                            xml.push_str(&format!("<uri>{}</uri>", xml_escape(inner)));
+                        } else {
+                            xml.push_str(&format!("<literal>{}</literal>", xml_escape(s)));
+                        }
+                    } else if s.starts_with("http://") || s.starts_with("https://") {
                         xml.push_str(&format!("<uri>{}</uri>", xml_escape(s)));
                     } else if s.starts_with("_:") {
                         xml.push_str(&format!(
@@ -747,3 +778,78 @@ pub(crate) fn format_graph_results(triples: &[(String, String, String)], accept:
 }
 
 // ─── RAG endpoint (v0.28.0) ──────────────────────────────────────────────────
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use axum::body::to_bytes;
+    use serde_json::json;
+
+    /// Extract the JSON body of a `Response` for assertion.
+    async fn body_json(resp: Response) -> serde_json::Value {
+        let bytes = to_bytes(resp.into_body(), 64 * 1024).await.unwrap();
+        serde_json::from_slice(&bytes).unwrap()
+    }
+
+    #[tokio::test]
+    async fn format_select_json_classifies_bare_http_iri_as_uri() {
+        let row = json!({ "s": "http://example.org/foo" });
+        let body = body_json(format_select_json(&[row])).await;
+        let binding = &body["results"]["bindings"][0]["s"];
+        assert_eq!(binding["type"], "uri");
+        assert_eq!(binding["value"], "http://example.org/foo");
+    }
+
+    #[tokio::test]
+    async fn format_select_json_unwraps_angle_bracketed_iri() {
+        // pg_ripple's N-Triples serialisation wraps IRIs in `<...>`. The
+        // previous implementation classified these as `type: "literal"`
+        // because the value did not start with `http://`. This test pins the
+        // new behaviour.
+        let row = json!({ "s": "<http://example.org/foo>" });
+        let body = body_json(format_select_json(&[row])).await;
+        let binding = &body["results"]["bindings"][0]["s"];
+        assert_eq!(
+            binding["type"], "uri",
+            "angle-bracketed IRI must be classified as uri, not literal"
+        );
+        assert_eq!(binding["value"], "http://example.org/foo");
+    }
+
+    #[tokio::test]
+    async fn format_select_json_preserves_plain_literals() {
+        let row = json!({ "name": "\"Alice\"@en" });
+        let body = body_json(format_select_json(&[row])).await;
+        let binding = &body["results"]["bindings"][0]["name"];
+        assert_eq!(binding["type"], "literal");
+        assert_eq!(binding["value"], "\"Alice\"@en");
+    }
+
+    #[tokio::test]
+    async fn format_select_json_classifies_blank_node() {
+        let row = json!({ "b": "_:abc123" });
+        let body = body_json(format_select_json(&[row])).await;
+        let binding = &body["results"]["bindings"][0]["b"];
+        assert_eq!(binding["type"], "bnode");
+        assert_eq!(binding["value"], "abc123");
+    }
+
+    #[tokio::test]
+    async fn format_select_xml_unwraps_angle_bracketed_iri() {
+        let row = json!({ "s": "<http://example.org/foo>" });
+        let resp = format_select_xml(&[row]);
+        assert_eq!(resp.status(), StatusCode::OK);
+        let bytes = to_bytes(resp.into_body(), 64 * 1024).await.unwrap();
+        let body = std::str::from_utf8(&bytes).unwrap();
+        // The wrapped IRI is emitted as <uri>...</uri>, with the brackets
+        // stripped from the value, not as <literal>...</literal>.
+        assert!(
+            body.contains("<uri>http://example.org/foo</uri>"),
+            "expected <uri>…</uri>, got: {body}"
+        );
+        assert!(
+            !body.contains("<literal>&lt;http://example.org/foo&gt;</literal>"),
+            "should not be wrapped in <literal>: {body}"
+        );
+    }
+}

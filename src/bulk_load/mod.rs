@@ -453,50 +453,77 @@ fn read_file_content(path: &str) -> String {
         .unwrap_or_else(|| pgrx::error!("pg_read_file({path}): returned NULL"))
 }
 
+/// Safety net invoked by every `*_file` entry point before delegating to the
+/// inline loader.
+///
+/// The shared-memory encode cache is initialised once at postmaster start
+/// and survives across `DROP EXTENSION` / `CREATE EXTENSION` cycles.  After
+/// a fresh `CREATE EXTENSION` followed by an empty dictionary table, a
+/// stale cache entry can short-circuit `dictionary::encode` before it
+/// reaches the SPI INSERT path that populates the dictionary, leaving the
+/// dictionary empty and every newly-inserted triple holding a dangling id.
+/// Flushing the cache before any `*_file` load guarantees that the first
+/// encode of every term goes through the dictionary table — at a small
+/// (one-shot) performance cost that is dwarfed by the bulk-load itself.
+///
+/// Idempotent: a no-op when the cache is already empty.
+pub(crate) fn pre_load_safety_check() {
+    crate::shmem::encode_cache_clear_all();
+    crate::dictionary::clear_caches();
+}
+
 /// Load N-Triples from a server-side file path.
 pub fn load_ntriples_file(path: &str, strict: bool) -> i64 {
+    pre_load_safety_check();
     let content = read_file_content(path);
     load_ntriples(&content, strict)
 }
 
 /// Load N-Quads from a server-side file path.
 pub fn load_nquads_file(path: &str, strict: bool) -> i64 {
+    pre_load_safety_check();
     let content = read_file_content(path);
     load_nquads(&content, strict)
 }
 
 /// Load Turtle from a server-side file path.
 pub fn load_turtle_file(path: &str, strict: bool) -> i64 {
+    pre_load_safety_check();
     let content = read_file_content(path);
     load_turtle(&content, strict)
 }
 
 /// Load TriG from a server-side file path.
 pub fn load_trig_file(path: &str, strict: bool) -> i64 {
+    pre_load_safety_check();
     let content = read_file_content(path);
     load_trig(&content, strict)
 }
 
 /// Load RDF/XML from a server-side file path (superuser required).
 pub fn load_rdfxml_file(path: &str, strict: bool) -> i64 {
+    pre_load_safety_check();
     let content = read_file_content(path);
     load_rdfxml(&content, strict)
 }
 
 /// Load N-Triples from a server-side file into a specific graph.
 pub fn load_ntriples_file_into_graph(path: &str, g_id: i64) -> i64 {
+    pre_load_safety_check();
     let content = read_file_content(path);
     load_ntriples_into_graph(&content, g_id)
 }
 
 /// Load Turtle from a server-side file into a specific graph.
 pub fn load_turtle_file_into_graph(path: &str, g_id: i64) -> i64 {
+    pre_load_safety_check();
     let content = read_file_content(path);
     load_turtle_into_graph(&content, g_id)
 }
 
 /// Load RDF/XML from a server-side file into a specific graph.
 pub fn load_rdfxml_file_into_graph(path: &str, g_id: i64) -> i64 {
+    pre_load_safety_check();
     let content = read_file_content(path);
     load_rdfxml_into_graph(&content, g_id)
 }

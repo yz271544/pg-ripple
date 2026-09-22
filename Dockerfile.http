@@ -100,18 +100,31 @@ RUN cargo fetch
 RUN cargo build --release -p pg_ripple_http
 
 # ── Runtime stage ─────────────────────────────────────────────────────────────
-# distroless/cc-debian12 provides glibc, libgcc, and a current CA bundle with
-# no shell, package manager, or other attack-surface enlargers.  The :nonroot
-# variant sets uid/gid 65532 ("nonroot") as the default user.
-FROM gcr.io/distroless/cc-debian12:nonroot@sha256:777e96cf322c46bc32aca926c263624c4dc8d7cf37e2fa65ba2c7e697318ebbb
+# Use the same pinned Debian/Rust base as the builder. Unlike distroless, this
+# runtime permits installation of CA certificates and optional probe tooling.
+FROM rust:1-bookworm@sha256:4e4a7e7939c17991ab35f2b8c2e67593980f771d28f6b1254b1850f860fd0c7f AS runtime
 
 LABEL org.opencontainers.image.source="https://github.com/trickle-labs/pg-ripple"
 LABEL org.opencontainers.image.description="SPARQL 1.1 Protocol HTTP endpoint for pg_ripple — connects PostgreSQL 18 RDF triple store to the web"
 LABEL org.opencontainers.image.licenses="Apache-2.0"
 
+# Install CA certificates for HTTPS SPARQL endpoints and create an unprivileged
+# runtime account. Health checks remain external (for example Kubernetes
+# readiness probes or Prometheus blackbox probes).
+RUN apt-get update -qq \
+    && apt-get install -y --no-install-recommends ca-certificates \
+    && groupadd --gid 65532 nonroot \
+    && useradd --uid 65532 --gid 65532 --no-create-home --shell /usr/sbin/nologin nonroot \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copy the static binary from the builder stage.
 COPY --from=builder /build/target/release/pg_ripple_http /pg_ripple_http
+
+USER 65532:65532
 
 # SPARQL HTTP endpoint port.  Override with PG_RIPPLE_HTTP_PORT env var.
 EXPOSE 7878
+
+# (No HEALTHCHECK here — see comment above.  Configured externally.)
 
 ENTRYPOINT ["/pg_ripple_http"]
