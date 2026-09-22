@@ -236,6 +236,9 @@ fn analyze_affected_tables(touched_predicates: &[i64]) {
 
 fn post_load_cleanup(touched_predicates: Vec<i64>) {
     storage::promote_rare_predicates();
+    // A query prepared before a new predicate was loaded may have cached an
+    // empty VP source; invalidate it after the catalog and rows are updated.
+    crate::sparql::plan_cache_reset();
     analyze_affected_tables(&touched_predicates);
 }
 
@@ -280,10 +283,10 @@ pub fn load_ntriples(data: &str, strict: bool) -> i64 {
     // once per load_* call rather than never (bulk inserts skip per-triple flush).
     crate::storage::mutation_journal::flush();
     post_load_cleanup(touched.into_iter().collect());
-    // M15-07 (v0.95.0): if this load was large, run VACUUM ANALYZE on the
+    // M15-07 (v0.95.0): if this load was large, run ANALYZE on the
     // dictionary table to keep planner statistics fresh without waiting for
     // the autovacuum daemon.  Each triple may add up to 3 new dictionary terms.
-    crate::dictionary::maybe_vacuum_dictionary(total as usize * 3);
+    crate::dictionary::maybe_analyze_dictionary(total as usize * 3);
     // v0.58.0: emit PROV-O provenance triples if enabled.
     crate::prov::emit_load_provenance("ntriples:inline", total);
     total

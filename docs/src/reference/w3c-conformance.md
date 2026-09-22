@@ -1,22 +1,22 @@
 # W3C Conformance
 
-This page summarises pg_ripple's conformance status against the W3C SPARQL 1.1, Apache Jena, SHACL Core, WatDiv, and LUBM test suites.
+This page summarizes pg_ripple's current standards evidence. Suite names do not imply that every upstream test or deployment mode is covered.
 
-As of v0.41.0, conformance is measured by integrated test harnesses that run in CI on every push to `main`. Pass rates are published as the `conformance_report` artifact on the [Actions page](https://github.com/trickle-labs/pg-ripple/actions).
+As of v0.136.0, the locked 324-case W3C SPARQL suite and the 14-query LUBM suite are required CI gates. Jena and WatDiv are additional signals. OWL 2 RL CI currently verifies only that the pinned upstream corpus can be downloaded and checksum-validated.
 
 ## Test suites
 
-pg_ripple runs four complementary conformance suites:
+pg_ripple runs these complementary qualification jobs:
 
 | Suite | Tests | What it validates |
 |---|---|---|
-| **W3C SPARQL 1.1** | ~3 000 | Standard conformance on small, well-defined fixtures |
+| **W3C SPARQL 1.1** | 324 locked cases | Required query and update conformance gate |
 | **Apache Jena** | ~1 000 | Implementation edge cases (type coercion, date-time, blank-node scoping) |
-| **WatDiv** | 100 templates | Correctness and performance at 10M-triple scale |
+| **WatDiv** | 32 checked-in templates | Query execution against an empty database; no current scale or latency claim |
 | **LUBM** | 14 queries | OWL RL inference correctness under ontological reasoning (v0.44.0+) |
-| **OWL 2 RL** | ~200 tests | W3C OWL 2 RL entailment, consistency, and inconsistency (v0.46.0+; informational until ≥95%) |
+| **OWL 2 RL** | 489 source cases | Required corpus acquisition and checksum check; cases are not executed by the current harness |
 
-All suites write per-suite results into a unified `tests/conformance/report.json` artifact.
+The execution suites write reports where supported. The OWL source job uploads the validated `all.rdf` corpus instead of a conformance report.
 
 See [Running Conformance Tests](running-conformance-tests.md) for local setup instructions, the [WatDiv Results](watdiv-results.md) page for performance metrics, and the [LUBM Results](lubm-results.md) page for OWL RL conformance details.
 
@@ -24,25 +24,24 @@ See [Running Conformance Tests](running-conformance-tests.md) for local setup in
 
 ## W3C SPARQL 1.1 test harness (v0.41.0+)
 
-The test harness (`tests/w3c/`) runs the official [W3C SPARQL 1.1 test suite](https://www.w3.org/2009/sparql/docs/tests/) (~3 000 tests across 13 sub-suites) against a live pg_ripple installation.
+The test harness (`tests/w3c/`) runs a locked set of 324 cases derived from the official [W3C SPARQL 1.1 test suite](https://www.w3.org/2009/sparql/docs/tests/) against a live pg_ripple installation. It runs serially because the cases share one PostgreSQL database. The checked v0.136.0 report has 324 passes and no failures, skips, or expected failures.
 
 ### Per-category coverage
 
 | Sub-suite | Tests | CI status |
 |---|---|---|
-| aggregates | ~120 | Required (smoke) |
-| bind | ~20 | Informational (full suite) |
-| exists | ~20 | Informational (full suite) |
-| functions | ~200 | Informational (full suite) |
-| grouping | ~40 | Required (smoke) |
-| negation | ~20 | Informational (full suite) |
-| optional | ~80 | Required (smoke) |
-| project-expression | ~10 | Informational (full suite) |
-| property-path | ~60 | Informational (full suite) |
-| service | ~10 | SKIP (live external endpoints) |
-| subquery | ~20 | Informational (full suite) |
-| syntax-query | ~300 | Informational (full suite) |
-| update | ~200 | Informational (full suite) |
+| aggregates | 47 | Required |
+| basic-update | 13 | Required |
+| bind | 10 | Required |
+| exists | 6 | Required |
+| functions | 75 | Required |
+| grouping | 6 | Required |
+| negation | 12 | Required |
+| project-expression | 7 | Required |
+| property-path | 33 | Required |
+| service | 7 | Required |
+| subquery | 14 | Required |
+| syntax-query | 94 | Required |
 
 ### Running locally
 
@@ -50,11 +49,11 @@ The test harness (`tests/w3c/`) runs the official [W3C SPARQL 1.1 test suite](ht
 # Download test data first (one-time setup):
 bash scripts/fetch_conformance_tests.sh --w3c
 
-# Run smoke subset (180 tests, ~30s):
+# Run the separate curated smoke subset:
 cargo test --test w3c_smoke
 
-# Run full W3C suite (3000+ tests, ~2min with 8 threads):
-cargo test --test w3c_suite -- --test-threads 8
+# Run the locked 324-case suite serially:
+cargo test --test w3c_suite -- --nocapture
 ```
 
 ---
@@ -99,7 +98,7 @@ cargo test --test jena_suite
 
 **Test suite**: [W3C SPARQL 1.1 Query test suite (2013-03-27)](https://www.w3.org/2009/sparql/test-suite-20130327/)
 
-**Target**: ≥ 95% of applicable tests pass.
+**Gate**: all 324 locked cases must pass.
 
 ### Supported features
 
@@ -166,7 +165,7 @@ cargo test --test jena_suite
 
 | Feature | Status |
 |---|---|
-| `COPY`, `MOVE`, `ADD` graph operations | Implemented as no-ops returning 0; full implementation planned for v0.21.0. |
+| `COPY`, `MOVE`, `ADD` graph operations | Supported. |
 | `LOAD <url>` | Same as for queries above. |
 
 ---

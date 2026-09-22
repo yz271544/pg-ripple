@@ -1,6 +1,6 @@
 # HTTP API Reference
 
-`pg_ripple_http` is a standalone Rust binary that exposes the full pg_ripple feature set over HTTP. It supports the W3C SPARQL 1.1 Protocol, Server-Sent Events streaming, Datalog REST operations, PageRank, probabilistic reasoning, Arrow Flight bulk export, and administrative endpoints.
+`pg_ripple_http` is a standalone Rust binary that exposes the full pg_ripple feature set over HTTP. It supports the W3C SPARQL 1.1 Protocol, live subscription streams over Server-Sent Events, Datalog REST operations, PageRank, probabilistic reasoning, Arrow Flight bulk export, and administrative endpoints.
 
 Start the service:
 
@@ -15,13 +15,17 @@ pg_ripple_http
 
 ## Authentication
 
-All endpoints that mutate state require a Bearer token when `PG_RIPPLE_HTTP_AUTH_TOKEN` is set.
+All protected endpoints require a Bearer token. Read, write, admin, and metrics
+tokens can be separated with the corresponding environment variables; when a
+specialized token is unset, the main token is used for that class.
 
 ```
 Authorization: Bearer <token>
 ```
 
-Read-only endpoints (`GET /health`, `GET /metrics`, `GET /openapi.yaml`) do not require authentication.
+Health endpoints are public. Metrics are public unless
+`PG_RIPPLE_HTTP_METRICS_TOKEN` is configured. All other endpoints are protected
+by their access class.
 
 ---
 
@@ -30,10 +34,18 @@ Read-only endpoints (`GET /health`, `GET /metrics`, `GET /openapi.yaml`) do not 
 | Environment Variable | Default | Description |
 |---|---|---|
 | `PG_RIPPLE_HTTP_PG_URL` | `postgresql://localhost/postgres` | PostgreSQL connection URL |
-| `PG_RIPPLE_HTTP_PORT` | `7878` | TCP listening port |
+| `PG_RIPPLE_HTTP_MODE` | `production` | `development` or `production` |
+| `PG_RIPPLE_HTTP_BIND` | `127.0.0.1:7878` | TCP listen address |
+| `PG_RIPPLE_HTTP_PORT` | `7878` | TCP listening port used when bind is unset |
 | `PG_RIPPLE_HTTP_POOL_SIZE` | `16` | PostgreSQL connection pool size |
-| `PG_RIPPLE_HTTP_AUTH_TOKEN` | *(none)* | Bearer token; set to enable auth |
-| `PG_RIPPLE_HTTP_DATALOG_WRITE_TOKEN` | *(falls back to auth token)* | Optional separate token for mutating Datalog/rule endpoints |
+| `PG_RIPPLE_HTTP_AUTH_TOKEN[_FILE]` | *(none)* | Read bearer token |
+| `PG_RIPPLE_HTTP_WRITE_TOKEN[_FILE]` | *(falls back to auth token)* | Write bearer token |
+| `PG_RIPPLE_HTTP_ADMIN_TOKEN[_FILE]` | *(falls back to auth token)* | Admin bearer token |
+| `PG_RIPPLE_HTTP_METRICS_TOKEN[_FILE]` | *(none)* | Optional metrics bearer token |
+| `PG_RIPPLE_HTTP_ALLOW_UNAUTHENTICATED` | `0` | Development-only explicit auth bypass |
+| `PG_RIPPLE_HTTP_PG_PASSWORD[_FILE]` | *(unset)* | PostgreSQL password or mounted secret file |
+| `PG_RIPPLE_HTTP_PG_SSLMODE` | `disable` | `disable`, `require`, `verify-ca`, or `verify-full` |
+| `PG_RIPPLE_HTTP_PG_CA_FILE` | *(unset)* | CA file required for `verify-ca` and `verify-full` |
 | `PG_RIPPLE_HTTP_RATE_LIMIT` | `100` | Per-IP rate limit (req/s; 0 = unlimited) |
 | `PG_RIPPLE_HTTP_CORS_ORIGINS` | `''` | Comma-separated allowed CORS origins; `*` enables permissive CORS |
 | `PG_RIPPLE_HTTP_MAX_BODY_BYTES` | `10485760` | Max request body size (10 MiB) |
@@ -46,6 +58,11 @@ Read-only endpoints (`GET /health`, `GET /metrics`, `GET /openapi.yaml`) do not 
 | `PG_RIPPLE_HTTP_CA_BUNDLE` | *(system roots)* | Extra CA bundle for outbound HTTPS clients |
 | `PG_RIPPLE_HTTP_PIN_FINGERPRINTS` | *(none)* | Optional pinned TLS certificate fingerprints |
 | `PG_RIPPLE_HTTP_SHUTDOWN_TIMEOUT_SECS` | `30` | Graceful shutdown timeout |
+| `PG_RIPPLE_HTTP_QUERY_TIMEOUT_MS` | `300000` | Default streaming query deadline |
+| `PG_RIPPLE_HTTP_QUERY_TIMEOUT_MAX_MS` | `900000` | Maximum streaming query deadline |
+| `PG_RIPPLE_HTTP_STREAM_IDLE_TIMEOUT_MS` | `60000` | Maximum wait between streamed rows |
+| `PG_RIPPLE_HTTP_STREAM_CHUNK_BYTES` | `65536` | Maximum coalesced response chunk |
+| `PG_RIPPLE_HTTP_STREAM_MAX_ROW_BYTES` | `1048576` | Maximum encoded row size |
 | `ARROW_FLIGHT_SECRET` | *(none)* | HMAC secret for Arrow Flight tickets |
 | `ARROW_UNSIGNED_TICKETS_ALLOWED` | `false` | Allow unsigned Arrow tickets for local development |
 | `ARROW_NONCE_CACHE_MAX` | `10000` | Replay-protection nonce cache size |
@@ -61,21 +78,22 @@ the endpoint is intentionally unauthenticated.
 | Method | Path | Auth | Description |
 |---|---|---|---|
 | `GET` | `/sparql` | Read | SPARQL 1.1 query via URL parameters |
-| `POST` | `/sparql` | Query-dependent | SPARQL 1.1 query/update via request body; updates require write auth |
-| `POST` | `/sparql/stream` | Read | Streaming SPARQL SELECT (SSE) |
+| `POST` | `/sparql` | Write | SPARQL 1.1 query/update via request body |
+| `POST` | `/sparql/bindings` | Read | SPARQL query with typed initial bindings |
+| `POST` | `/sparql/stream` | Read | Explicit streaming SPARQL compatibility alias |
 | `POST` | `/rag` | Read | RAG retrieval / NL-to-SPARQL |
 | `GET` | `/health` | None | Liveness probe |
 | `GET` | `/ready` | None | Kubernetes readiness probe |
 | `GET` | `/health/ready` | None | Deep extension readiness probe |
 | `GET` | `/metrics` | None or metrics token | Prometheus metrics |
-| `GET` | `/metrics/extension` | None | Extension-internal Prometheus metrics |
-| `GET` | `/void` | None | VoID dataset description |
-| `GET` | `/service` | None | SPARQL service description |
-| `GET` | `/openapi.yaml` | None | OpenAPI 3.1 specification |
-| `GET` | `/explorer` | Read | Web-based SPARQL explorer UI |
-| `GET` | `/admin/bench-history` | Write | Recent benchmark history from `_pg_ripple.bench_history` |
-| `GET` | `/admin/diagnostic-snapshot` | Write | Diagnostic bundle with schema, GUC, version, and metrics data |
-| `POST` | `/flight/do_get` | Write | Arrow Flight bulk export |
+| `GET` | `/metrics/extension` | Metrics | Extension-internal Prometheus metrics |
+| `GET` | `/void` | Read | VoID dataset description |
+| `GET` | `/service` | Read | SPARQL service description |
+| `GET` | `/openapi.yaml` | Read | OpenAPI 3.1 specification |
+| `GET` | `/explorer` | Admin | Web-based SPARQL explorer UI |
+| `GET` | `/admin/bench-history` | Admin | Recent benchmark history from `_pg_ripple.bench_history` |
+| `GET` | `/admin/diagnostic-snapshot` | Admin | Diagnostic bundle with schema, GUC, version, and metrics data |
+| `POST` | `/flight/do_get` | Read | Arrow Flight bulk export |
 | `GET` | `/subscribe/{subscription_id}` | Read | Live SPARQL subscription SSE stream |
 | `GET` | `/datalog/rules` | Read | List Datalog rule sets |
 | `POST/DELETE` | `/datalog/rules/{rule_set}` | Write | Load or drop a rule set |
@@ -93,11 +111,11 @@ the endpoint is intentionally unauthenticated.
 | `POST` | `/datalog/query/{rule_set}` | Read | Goal-directed Datalog query |
 | `GET` | `/datalog/constraints` | Read | Check all constraint rules |
 | `GET` | `/datalog/constraints/{rule_set}` | Read | Check constraints for one rule set |
-| `GET` | `/datalog/stats/cache` | Read | Rule plan cache statistics |
-| `GET` | `/datalog/stats/tabling` | Read | Tabling cache statistics |
-| `GET/POST` | `/datalog/lattices` | Read/Write | List or create lattice structures |
-| `GET/POST` | `/datalog/views` | Read/Write | List or create Datalog-backed views |
-| `DELETE` | `/datalog/views/{name}` | Write | Drop a Datalog-backed view |
+| `GET` | `/datalog/stats/cache` | Admin | Rule plan cache statistics |
+| `GET` | `/datalog/stats/tabling` | Admin | Tabling cache statistics |
+| `GET/POST` | `/datalog/lattices` | Read/Admin | List or create lattice structures |
+| `GET/POST` | `/datalog/views` | Read/Admin | List or create Datalog-backed views |
+| `DELETE` | `/datalog/views/{name}` | Admin | Drop a Datalog-backed view |
 | `POST` | `/pagerank/run` | Write | Start PageRank computation |
 | `GET` | `/pagerank/status` | Read | PageRank computation status |
 | `GET` | `/pagerank/results` | Read | Retrieve PageRank scores |
@@ -107,7 +125,7 @@ the endpoint is intentionally unauthenticated.
 | `POST` | `/pagerank/vacuum-dirty` | Write | Vacuum stale PageRank rows |
 | `POST` | `/centrality/run` | Write | Compute centrality metrics |
 | `GET` | `/centrality/results` | Read | Retrieve centrality results |
-| `POST` | `/pagerank/find-duplicates` | Read | Find near-duplicate nodes |
+| `POST` | `/pagerank/find-duplicates` | Write | Find near-duplicate nodes |
 | `POST` | `/confidence/load` | Write | Load triples with confidence scores |
 | `GET` | `/confidence/shacl-score` | Read | Get SHACL soft-validation scores |
 | `GET` | `/confidence/shacl-report` | Read | Get scored SHACL validation report |
@@ -116,13 +134,13 @@ the endpoint is intentionally unauthenticated.
 | `POST` | `/confidence/bulk-update` | Write | Bulk confidence update |
 | `POST` | `/explain` | Read | Natural-language explanation of a query or result |
 | `GET` | `/explain` | Read | Explanation endpoint metadata/query form |
-| `POST` | `/hypothetical` | Write | What-if reasoning against hypothetical facts |
+| `POST` | `/hypothetical` | Read | What-if reasoning against hypothetical facts |
 | `GET` | `/rule-conflicts/{ruleset}` | Read | Detect rule conflicts in a rule set |
 | `GET` | `/rule-libraries` | Read | List rule libraries |
 | `GET` | `/rule-libraries/{name}/stream` | Read | Stream a published rule library |
 | `POST` | `/rule-libraries/{name}/subscribe` | Write | Subscribe to a remote rule library stream |
-| `POST` | `/rules/draft` | Write | Draft rules from natural-language guidance |
-| `POST` | `/rules/validate` | Write | Validate a drafted rule |
+| `POST` | `/rules/draft` | Read | Draft rules from natural-language guidance |
+| `POST` | `/rules/validate` | Read | Validate a drafted rule |
 | `GET` | `/rules/{id}/explain` | Read | Explain a rule by ID |
 | `GET/POST` | `/temporal/mark` | Read/Write | List or mark temporal predicates |
 | `POST` | `/temporal/point_in_time` | Write | Set point-in-time temporal context |
@@ -130,12 +148,12 @@ the endpoint is intentionally unauthenticated.
 | `GET` | `/temporal/graphs/{iri}/snapshot` | Read | Materialize a point-in-time graph snapshot |
 | `GET` | `/temporal/graphs/{iri}/diff` | Read | Diff a named graph between two timestamps |
 | `POST` | `/pprl/bloom_encode` | Write | Privacy-preserving Bloom encoding |
-| `POST` | `/pprl/dice_similarity` | Read | Dice similarity over encoded values |
-| `POST` | `/dp/noisy_count` | Read | Differential privacy noisy count |
-| `POST` | `/dp/noisy_histogram` | Read | Differential privacy noisy histogram |
+| `POST` | `/pprl/dice_similarity` | Write | Dice similarity over encoded values |
+| `POST` | `/dp/noisy_count` | Write | Differential privacy noisy count |
+| `POST` | `/dp/noisy_histogram` | Write | Differential privacy noisy histogram |
 | `GET` | `/dp/budget/{dataset}/{principal}` | Read | Privacy budget status |
 | `POST` | `/entity-resolution/resolve` | Write | Run entity resolution |
-| `POST` | `/entity-resolution/evaluate` | Read | Evaluate entity-resolution output |
+| `POST` | `/entity-resolution/evaluate` | Write | Evaluate entity-resolution output |
 | `POST` | `/entity-resolution/monitoring/enable` | Write | Enable entity-resolution monitoring |
 | `POST` | `/entity-resolution/monitoring/disable` | Write | Disable entity-resolution monitoring |
 | `GET` | `/proof-tree/{subject}/{predicate}/{object}` | Read | Explain derivation/proof tree for a triple |
@@ -145,6 +163,7 @@ the endpoint is intentionally unauthenticated.
 | `GET` | `/federation/{endpoint}/auth-status` | Write | Per-endpoint federation credential status |
 | `POST` | `/json-mapping/{name}/writeback` | Write | Synchronous JSON mapping relational writeback |
 | `GET` | `/json-mapping/{name}/writeback/status` | Read | JSON mapping writeback queue status |
+| `GET` | `/json-mapping/{name}/writeback/config` | Read | Validated JSON mapping writeback configuration |
 
 ---
 
@@ -208,30 +227,51 @@ curl -X POST http://localhost:7878/sparql \
 
 ---
 
+### `POST /sparql/bindings`
+
+Execute a read-only SELECT, ASK, CONSTRUCT, or DESCRIBE query with one-row
+typed initial bindings. The request body is JSON; binding values use the W3C
+SPARQL Results JSON term shape and support `uri` and `literal` terms.
+
+```json
+{
+  "query": "SELECT ?s WHERE { ?s <https://example.org/email> ?email }",
+  "bindings": {
+    "email": {"type": "literal", "value": "alice@example.test"}
+  },
+  "prefix_mode": "strict",
+  "timeout_ms": 1000
+}
+```
+
+Use `prefix_mode: "registered"` to resolve undeclared prefixes from the
+governed registry. Query-local declarations take precedence. Binding payloads
+are validated before streaming begins; SPARQL Update, blank-node, RDF-star,
+and multi-row bindings are rejected.
+
+The response uses the same content negotiation and streaming formats as
+`POST /sparql/stream`.
+
+---
+
 ### `POST /sparql/stream`
 
-Streaming SPARQL SELECT using Server-Sent Events. Results are delivered as SSE `data:` events, one result row per event, as the query executes.
+Explicit streaming compatibility alias. Results are delivered from the
+PostgreSQL row stream with natural HTTP backpressure.
 
 **Request:** Same as `POST /sparql`.
 
-**Response Content-Type:** `text/event-stream`
-
-**Event format:**
-
-```
-event: row
-data: {"?name": "\"Alice\"^^xsd:string", "?age": "\"30\"^^xsd:integer"}
-
-event: done
-data: {"total_rows": 42}
-```
+**Response Content-Type:** `application/sparql-results+json`, `text/csv`,
+`text/tab-separated-values`, or `application/n-triples`, selected by `Accept`.
+JSON is a complete SPARQL Results JSON document, not JSON-Lines or SSE. XML,
+Turtle, and JSON-LD remain buffered on `/sparql`.
 
 **Example:**
 
 ```bash
 curl -X POST http://localhost:7878/sparql/stream \
   -H "Content-Type: application/sparql-query" \
-  -H "Accept: text/event-stream" \
+  -H "Accept: application/sparql-results+json" \
   -d 'SELECT ?s ?p ?o WHERE { ?s ?p ?o }' \
   --no-buffer
 ```
@@ -321,6 +361,7 @@ subject_iri)` and requires write auth when authentication is enabled.
 |---|---|---|
 | `422` | `writeback_target_not_configured` | The mapping has no writeback table or key columns (`PT0550`) |
 | `409` | `writeback_conflict` | Conflict policy is `error` and a conflicting row exists (`PT0551`) |
+| `422` | `writeback_key_column_missing` | A configured key-column predicate has no value for this subject (`PT0552`) |
 
 ### `GET /json-mapping/{name}/writeback/status`
 
@@ -337,6 +378,26 @@ requires read auth when authentication is enabled.
   "errors": 0,
   "last_error": null,
   "last_processed_at": null
+}
+```
+
+### `GET /json-mapping/{name}/writeback/config`
+
+Return the validated relational target and writeback health for one mapping.
+The response mirrors `pg_ripple.writeback_inspect()` and requires read auth
+when authentication is enabled.
+
+**Response (200 OK):**
+
+```json
+{
+  "target_schema": "public",
+  "target_table": "contacts",
+  "key_columns": ["contact_id"],
+  "conflict_policy": "replace",
+  "writeback_enabled": false,
+  "trigger_count": 0,
+  "queue_depth": 0
 }
 ```
 

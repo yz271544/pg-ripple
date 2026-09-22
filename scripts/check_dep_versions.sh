@@ -20,6 +20,7 @@ ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 
 VERSIONS_FILE="${ROOT}/.versions.toml"
 DOCKERFILE="${ROOT}/Dockerfile"
+CNPG_DOCKERFILE="${ROOT}/docker/Dockerfile.cnpg"
 LIBRS="${ROOT}/src/lib.rs"
 
 FAILURES=0
@@ -37,9 +38,9 @@ toml_get() {
 
 # Read a Dockerfile ARG default value.
 # Format: ARG NAME=value
-# Usage: dockerfile_get "PG_TRICKLE_VERSION"
+# Usage: dockerfile_get "PG_TRICKLE_VERSION" [path/to/Dockerfile]
 dockerfile_get() {
-    grep "^ARG $1=" "${DOCKERFILE}" \
+    grep "^ARG $1=" "${2:-${DOCKERFILE}}" \
         | head -1 \
         | sed 's/ARG [^=]*=\(.*\)/\1/'
 }
@@ -109,6 +110,13 @@ check \
     "${CANONICAL_PGVECTOR}" \
     "$(dockerfile_get "PGVECTOR_VERSION")" \
     "Set 'ARG PGVECTOR_VERSION=${CANONICAL_PGVECTOR}' in Dockerfile"
+
+# pgvector — docker/Dockerfile.cnpg (separate Dockerfile, pins its own ARG)
+check \
+    "docker/Dockerfile.cnpg ARG PGVECTOR_VERSION" \
+    "${CANONICAL_PGVECTOR}" \
+    "$(dockerfile_get "PGVECTOR_VERSION" "${CNPG_DOCKERFILE}")" \
+    "Set 'ARG PGVECTOR_VERSION=${CANONICAL_PGVECTOR}' in docker/Dockerfile.cnpg"
 
 # ── Result ────────────────────────────────────────────────────────────────────
 

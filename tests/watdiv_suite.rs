@@ -1,10 +1,9 @@
 //! WatDiv benchmark suite for pg_ripple.
 //!
-//! Runs all 100 WatDiv query templates at 10M triples, checking:
-//! - Correctness: result row count within ±0.1% of baseline
-//! - Performance: median latency per template (regressions > 20% are logged)
+//! Runs the 32 checked-in WatDiv query templates.
+//! Current CI uses an empty database and has no populated correctness or latency baseline.
 //!
-//! The suite is non-blocking in CI (performance regressions are warnings only).
+//! Query-execution failures are blocking in CI.
 //!
 //! # Running locally
 //!

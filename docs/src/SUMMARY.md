@@ -10,6 +10,7 @@
 - [Architecture at a Glance](evaluate/architecture-glance.md)
 - [Comparison vs Alternatives](evaluate/comparison.md)
 - [Performance & Conformance Results](evaluate/performance-results.md)
+- [v0.132.0 Soak-Test Evidence](benchmarks/soak-0.132.0.md)
 
 ---
 
@@ -125,6 +126,7 @@
 - [Troubleshooting](operations/troubleshooting.md)
 - [Security](operations/security.md)
 - [Compatibility Matrix](operations/compatibility.md)
+- [HTTP Companion Operations](operations/http-companion.md)
 
 ---
 
@@ -170,6 +172,7 @@
 - [Architecture (Internals)](reference/architecture.md)
 - [Subsystem Dependency Graph](architecture.md)
 - [GUC Reference](reference/guc-reference.md)
+- [GUCs](reference/gucs.md)
 - [Deprecated GUCs](reference/deprecated-gucs.md)
 - [Feature Status Taxonomy](reference/feature-status-taxonomy.md)
 - [Plan Cache](reference/plan-cache.md)

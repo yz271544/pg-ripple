@@ -17,6 +17,14 @@
 
 SET search_path TO pg_ripple, public;
 
+\if :{?scale}
+\else
+\set scale 1
+\endif
+
+CREATE TEMP TABLE bsbm_config (scale integer NOT NULL);
+INSERT INTO bsbm_config VALUES (:scale);
+
 -- ── Register standard BSBM prefixes ──────────────────────────────────────────
 SELECT pg_ripple.register_prefix('bsbm', 'http://www4.wiwiss.fu-berlin.de/bizer/bsbm/v01/vocabulary/');
 SELECT pg_ripple.register_prefix('bsbm-inst', 'http://www4.wiwiss.fu-berlin.de/bizer/bsbm/v01/instances/');
@@ -33,7 +41,7 @@ SELECT pg_ripple.register_prefix('xsd', 'http://www.w3.org/2001/XMLSchema#');
 
 DO $$
 DECLARE
-    scale     INT := COALESCE(NULLIF('$BSBM_SCALE', ''), '1')::int;
+    scale     INT := (SELECT c.scale FROM bsbm_config AS c);
     n_prod    INT := scale * 1000;   -- products
     n_feat    INT := scale * 5;      -- product features (classes)
     n_vendor  INT := GREATEST(1, scale * 10);  -- vendors
@@ -185,3 +193,4 @@ END $$;
 
 -- Report loaded triple count.
 SELECT pg_ripple.triple_count() AS bsbm_total_triples;
+DROP TABLE bsbm_config;

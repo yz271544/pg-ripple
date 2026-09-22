@@ -14,7 +14,7 @@
 //!
 //! # Baseline format
 //!
-//! `tests/watdiv/baselines.json` maps template ID → expected row count at 10M triples:
+//! A supplied baseline file can map a template ID to an expected row count:
 //! ```json
 //! { "S1": 500, "S2": 150, "C1": 32 }
 //! ```

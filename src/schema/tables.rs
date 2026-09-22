@@ -1,4 +1,5 @@
 //! Foundation schema tables, sequences, and indexes (v0.1.0 -- v0.28.0).
+// @allow-large-file: versioned foundation DDL remains grouped in one schema module
 //!
 //! Split from `schema.rs` in v0.85.0 (Q13-02).
 
@@ -58,6 +59,19 @@ CREATE TABLE IF NOT EXISTS _pg_ripple.predicates (
     tombstone_count       BIGINT      NOT NULL DEFAULT 0
 );
 
+-- Merge-worker lifecycle diagnostics.
+CREATE TABLE IF NOT EXISTS _pg_ripple.merge_worker_status (
+    worker_idx        INTEGER PRIMARY KEY,
+    pid               BIGINT NOT NULL DEFAULT 0,
+    status            TEXT NOT NULL DEFAULT 'starting',
+    updated_at        TIMESTAMPTZ NOT NULL DEFAULT now(),
+    restart_count     BIGINT NOT NULL DEFAULT 0,
+    last_error        TEXT,
+    last_heartbeat_at TIMESTAMPTZ,
+    predicates_total  BIGINT NOT NULL DEFAULT 0,
+    delta_rows_pending BIGINT NOT NULL DEFAULT 0
+);
+
 -- Rare-predicate consolidation table
 CREATE TABLE IF NOT EXISTS _pg_ripple.vp_rare (
     p      BIGINT   NOT NULL,
@@ -73,6 +87,7 @@ CREATE INDEX IF NOT EXISTS idx_vp_rare_s_p     ON _pg_ripple.vp_rare (s, p);
 CREATE INDEX IF NOT EXISTS idx_vp_rare_g_p_s_o ON _pg_ripple.vp_rare (g, p, s, o);
 -- v0.37.0: (o, s) index eliminates seq-scans on object-leading patterns
 CREATE INDEX IF NOT EXISTS vp_rare_os_idx      ON _pg_ripple.vp_rare (o, s);
+CREATE INDEX IF NOT EXISTS idx_vp_rare_i       ON _pg_ripple.vp_rare (i);
 
 -- Statements range-mapping catalog (v0.2.0)
 CREATE TABLE IF NOT EXISTS _pg_ripple.statements (
@@ -86,8 +101,18 @@ CREATE TABLE IF NOT EXISTS _pg_ripple.statements (
 -- IRI prefix registry
 CREATE TABLE IF NOT EXISTS _pg_ripple.prefixes (
     prefix    TEXT NOT NULL PRIMARY KEY,
-    expansion TEXT NOT NULL
+    expansion TEXT NOT NULL,
+    owner_oid OID NOT NULL DEFAULT (current_user::regrole)::oid,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+CREATE TABLE IF NOT EXISTS _pg_ripple.prefix_registry_state (
+    singleton  BOOLEAN NOT NULL PRIMARY KEY DEFAULT true CHECK (singleton),
+    generation BIGINT NOT NULL DEFAULT 1
+);
+INSERT INTO _pg_ripple.prefix_registry_state (singleton, generation)
+VALUES (true, 1) ON CONFLICT (singleton) DO NOTHING;
+REVOKE INSERT, UPDATE, DELETE ON _pg_ripple.prefixes FROM PUBLIC;
 
 -- Named-graph registry (v0.43.0)
 -- Tracks named graph IRIs that have been explicitly loaded, even if the
@@ -930,4 +955,88 @@ COMMENT ON FUNCTION _pg_ripple.json_writeback_enqueue_fn() IS
 "#,
     name = "v0128_json_writeback_schema",
     requires = ["v0126_federation_credentials", "v073_schema_additions"]
+);
+
+// v0.129.0: A18 critical & high correctness remediation for JSON mapping
+// relational writeback (C18-01 / H18-02). Schema changes:
+//   - _pg_ripple.json_writeback_queue.retry_count: tracks drain-loop
+//     retries when the status UPDATE itself fails (L18-02)
+//   - _pg_ripple.json_mappings.writeback_column_casts: caches derived
+//     column-type casts so writeback_json_row() need not re-derive them
+//     from pg_attribute on every call (H18-02 / TYPED-PARAMS)
+//   - json_writeback_enqueue_fn() gains an optional predicate-id filter
+//     argument (for tables shared by multiple predicates, e.g. vp_rare)
+//     and treats an INSERT on a *_tombstones table as a delete event for
+//     main-resident rows (C18-01 / ENQUEUE-COVERAGE)
+pgrx::extension_sql!(
+    r#"
+-- v0.129.0 L18-02: track drain retry attempts when the status UPDATE itself fails.
+ALTER TABLE _pg_ripple.json_writeback_queue
+    ADD COLUMN IF NOT EXISTS retry_count SMALLINT NOT NULL DEFAULT 0;
+
+COMMENT ON COLUMN _pg_ripple.json_writeback_queue.retry_count IS
+    'Incremented by drain_json_writeback_queue() when its own status-update fails, '
+    'so the row stays pending instead of being silently dropped (v0.129.0 L18-02). '
+    'Exposed via the pg_ripple_json_writeback_drain_errors_total metric.';
+
+-- v0.129.0 H18-02 / TYPED-PARAMS: cache derived column-cast expressions.
+ALTER TABLE _pg_ripple.json_mappings
+    ADD COLUMN IF NOT EXISTS writeback_column_casts JSONB;
+
+-- v0.129.0 C18-01: the enqueue trigger function now accepts an optional
+-- second argument (predicate id) so it can be installed on tables shared by
+-- multiple predicates (vp_rare), and treats an INSERT on a *_tombstones
+-- table as a delete event for main-resident rows.
+CREATE OR REPLACE FUNCTION _pg_ripple.json_writeback_enqueue_fn()
+RETURNS trigger
+LANGUAGE plpgsql AS $$
+DECLARE
+    v_mapping_name TEXT    := TG_ARGV[0];
+    v_pred_filter  BIGINT  := NULLIF(TG_ARGV[1], '')::BIGINT;
+    v_subject_id   BIGINT;
+    v_operation    TEXT;
+    v_row_pred     BIGINT;
+    v_is_tombstone BOOLEAN := TG_TABLE_NAME LIKE '%\_tombstones' ESCAPE '\';
+BEGIN
+    IF TG_TABLE_NAME = 'vp_rare' THEN
+        IF TG_OP = 'INSERT' THEN
+            v_row_pred := NEW.p;
+        ELSIF TG_OP = 'DELETE' THEN
+            v_row_pred := OLD.p;
+        END IF;
+        IF v_pred_filter IS NOT NULL AND v_row_pred IS DISTINCT FROM v_pred_filter THEN
+            RETURN NULL;
+        END IF;
+    END IF;
+
+    IF v_is_tombstone THEN
+        IF TG_OP <> 'INSERT' THEN
+            RETURN NULL;
+        END IF;
+        v_subject_id := NEW.s;
+        v_operation  := 'delete';
+    ELSIF TG_OP = 'INSERT' THEN
+        v_subject_id := NEW.s;
+        v_operation  := 'upsert';
+    ELSIF TG_OP = 'DELETE' THEN
+        v_subject_id := OLD.s;
+        v_operation  := 'delete';
+    ELSE
+        RETURN NULL;
+    END IF;
+
+    INSERT INTO _pg_ripple.json_writeback_queue
+        (mapping_name, subject_id, operation)
+    VALUES (v_mapping_name, v_subject_id, v_operation);
+    RETURN NULL;
+END;
+$$;
+
+COMMENT ON FUNCTION _pg_ripple.json_writeback_enqueue_fn() IS
+    'Trigger function that enqueues VP delta/vp_rare/tombstone changes into '
+    'json_writeback_queue (v0.128.0 JSON-WRITEBACK-01; v0.129.0 C18-01 adds '
+    'vp_rare predicate filtering and tombstone-table support)';
+"#,
+    name = "v0129_json_writeback_fixes",
+    requires = ["v0128_json_writeback_schema"]
 );

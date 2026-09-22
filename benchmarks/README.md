@@ -1,100 +1,55 @@
 # Benchmarks
 
-This directory contains all pg_ripple performance benchmarks. The benchmarks
-span storage throughput, query performance, Datalog inference, vector search,
-PageRank, probabilistic reasoning, and federation.
+This directory contains benchmark harnesses. Only results that identify the exact commit, fixture, software versions, runner, and raw output should be used as current evidence.
 
-## Files
+## Current automated producer
 
-| File | What it measures |
-|------|-----------------|
-| `ci_benchmark.sh` | Orchestrator — runs the full benchmark suite in CI and writes results to `merge_throughput_history.csv` and `pagerank_throughput_history.csv` |
-| `insert_throughput.sql` | Triple insertion rate: bulk (`load_ntriples`) and single-triple insert via SPI |
-| `merge_throughput.sql` | HTAP background-merge worker throughput: measures time to merge 100K delta rows into main VP tables |
-| `pagerank.sql` | PageRank convergence time for a synthetic 100K-node directed graph |
-| `pagerank_scale.sh` | PageRank scaling: runs at 10K, 100K, 1M nodes and records convergence time |
-| `pagerank_with_writes.sh` | Concurrent writes + PageRank: 4 `pgbench` writer clients + 1 reader + 1 background PageRank |
-| `pagerank_throughput_history.csv` | Recorded per-run PageRank timing history (appended by CI) |
-| `merge_throughput_history.csv` | Recorded per-run merge timing history (appended by CI) |
-| `merge_throughput_baselines.json` | Expected baseline timing for the HTAP merge regression gate |
-| `datalog_agg.sql` | Datalog aggregation inference throughput |
-| `magic_sets.sql` | Magic-sets goal-directed inference vs full materialization comparison |
-| `wcoj.sql` | Worst-case optimal join (Leapfrog Triejoin) for cyclic SPARQL patterns |
-| `hybrid_search.sql` | Hybrid vector+SPARQL query latency |
-| `confidence_join_scale.sql` | Probabilistic Datalog: confidence join scale test |
-| `probabilistic_overhead.sql` | Overhead of `@weight` rule annotations vs plain Datalog |
-| `shacl_async_load.sql` | SHACL async validation queue throughput under load |
-| `vector_index_compare.sql` | HNSW vs flat-scan vector index comparison |
-| `bidi_relay_throughput.sql` | Bidirectional relay event throughput |
-| `bidiops_throughput.sql` | Bidirectional operations (outbox publish + inbox drain) throughput |
-| `bsbm/` | BSBM (Berlin SPARQL Benchmark) harness — see `bsbm/README.md` |
-| `er_magellan.sh` | Entity-resolution F1 vs Magellan Abt-Buy and DBLP-ACM datasets |
-| `er_freshness.sh` | Entity-resolution p95 latency at 100 records/s ingestion rate |
+The manual `Benchmark` GitHub Actions workflow runs `ci_benchmark.sh`. It measures one bounded synthetic workload:
 
-## Running benchmarks locally
+- load 100,000 triples in 5,000-triple batches;
+- run 100 warmed point lookups;
+- run 50 warmed single-pattern SPARQL queries;
+- write raw output, environment details, and `benchmark_results.json`;
+- retain the artifact for 90 days.
 
-Prerequisites: a running PostgreSQL 18 instance with pg_ripple installed.
+The script requires PostgreSQL 18 with pg_ripple already installed in an empty database. It refuses a non-empty database and does not drop user data.
 
 ```bash
-# Start the pgrx-managed cluster (or point PGPORT at your own PG18 instance).
 cargo pgrx start pg18
-export PGPORT=28818
-
-# Run the full CI benchmark suite.
-bash benchmarks/ci_benchmark.sh
-
-# Run a single benchmark.
-psql -p "$PGPORT" -U "$USER" -d pg_ripple -f benchmarks/merge_throughput.sql
+createdb pg_ripple_benchmark
+psql -d pg_ripple_benchmark -c 'CREATE EXTENSION pg_ripple CASCADE'
+PGDATABASE=pg_ripple_benchmark \
+  BENCH_RUNNER=local \
+  RESULT_FILE=benchmark_results.json \
+  bash benchmarks/ci_benchmark.sh
 ```
 
-## How ci_benchmark.sh works
+The JSON contains the extension and PostgreSQL versions, commit SHA, timestamp, runner, fixture ID, insert throughput, and average point and SPARQL latency. Set `BASELINE_FILE` only when the baseline used the same fixture and comparable hardware.
 
-`ci_benchmark.sh` orchestrates the full suite:
+## BSBM execution gate
 
-1. **Seed data** — loads 100K triples from the bundled N-Triples fixture.
-2. **Merge benchmark** — triggers the HTAP background worker and records the
-   merge duration.  Results are appended to `merge_throughput_history.csv`.
-3. **PageRank benchmark** — runs `pg_ripple.pagerank_run()` over the seeded
-   graph and records convergence time.  Results go to
-   `pagerank_throughput_history.csv`.
-4. **Regression gate** — compares the recorded duration against baselines in
-   `merge_throughput_baselines.json`.  Exits non-zero if any benchmark exceeds
-   `1.5×` the baseline, causing CI to fail.
+Required CI loads the repository's adapted BSBM fixture at scale 59, verifies a triple count between 900,000 and 1,100,000, and runs the checked-in query mix with `ON_ERROR_STOP=1`. It retains the load log, query log, and elapsed time.
 
-```bash
-# Inspect the regression gate baselines.
-cat benchmarks/merge_throughput_baselines.json
-```
+This is an execution and scale gate. It is not an official BSBM score and does not enforce a latency regression threshold.
 
-## Interpreting CSV history files
+## Other harnesses
 
-Both `merge_throughput_history.csv` and `pagerank_throughput_history.csv` share
-the same schema:
+The SQL and shell files in this directory support targeted experiments for merge workers, PageRank, Datalog, vector search, probabilistic reasoning, federation, and other subsystems. They are not all run by current CI.
 
-```
-run_id,started_at,triples,duration_ms,git_sha
-```
+`merge_throughput_history.csv`, `pagerank_throughput_history.csv`, and `merge_throughput_baselines.json` are historical, unverified records. Their schemas differ and no retained raw artifacts tie them to the current architecture. Do not use them as v0.136.0 capacity or regression baselines.
 
-- **`run_id`** — monotonically increasing integer.
-- **`started_at`** — ISO 8601 timestamp of the benchmark run.
-- **`triples`** — number of triples in the triple store at the time of the run.
-- **`duration_ms`** — wall-clock duration of the benchmark in milliseconds.
-- **`git_sha`** — short Git commit hash for the build under test.
+Record new results under `benchmarks/results/` only with sanitized environment details and raw output.
 
-Regressions are visible as step-changes in `duration_ms` across commits.
-Use the following to plot a quick trend:
+## Checked-in result
 
-```bash
-python3 -c "
-import csv, sys
-reader = csv.DictReader(open('benchmarks/merge_throughput_history.csv'))
-for row in reader:
-    print(row['started_at'][:10], row['duration_ms'], row['git_sha'])
-"
-```
+The first result using this evidence format is for pg_ripple 0.136.0 at commit
+`993af4fef88e` on an Apple M1 Pro:
 
-## BSBM regression gate
+| Fixture | Insert throughput | Point query | SPARQL BGP |
+|---|---:|---:|---:|
+| `synthetic-100k-v1` | 5,666 triples/s | 0.819 ms | 0.277 ms |
 
-The `bsbm/` subdirectory contains the Berlin SPARQL Benchmark (BSBM) harness.
-It runs 100 query templates against a 1M-triple dataset and records per-template
-latency.  See `bsbm/README.md` for setup and invocation.
+See the [JSON result](results/v0.136.0-993af4fe-m1-pro.json),
+[raw output](results/v0.136.0-993af4fe-m1-pro.txt), and
+[sanitized environment](results/v0.136.0-993af4fe-m1-pro-environment.txt).
+This is one bounded run, not a capacity or cross-system comparison.

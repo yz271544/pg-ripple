@@ -6,17 +6,21 @@
 > optional CDC/IVM compatibility in a multi-worker environment. It assumes you
 > have already read the [Citus Integration](citus-integration.md) page.
 
+```admonish warning title="Experimental qualification"
+Current CI does not install Citus or run a multi-node cluster. It verifies graceful degradation when Citus is absent. Run the full setup, correctness, rebalance, failure, and load tests on a disposable target-like cluster before production use.
+```
+
 ---
 
 ## Overview
 
-The v0.58.0 + v0.59.0 releases complete the Citus sharding story:
+The Citus integration exposes these implementation paths:
 
 | Feature | Version | Description |
 |---------|---------|-------------|
 | VP table distribution | v0.58.0 | `enable_citus_sharding()` distributes VP delta tables |
 | Merge fence advisory lock | v0.58.0 | Prevents split-brain during rebalancing |
-| SPARQL shard-pruning | v0.59.0 | Bound-subject queries target one shard (10–100×) |
+| SPARQL shard-pruning | v0.59.0 | Bound-subject queries can carry a shard-routing key |
 | Rebalance NOTIFY | v0.59.0 | `merge_start`/`merge_end` signals for downstream maintenance hooks |
 | `explain_sparql` Citus section | v0.59.0 | Verify pruning with `EXPLAIN` |
 | `citus_rebalance_progress()` | v0.59.0 | Observe live rebalance status |

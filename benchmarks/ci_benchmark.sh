@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# ci_benchmark.sh — CI performance regression baseline for pg_ripple.
+# ci_benchmark.sh — bounded performance evidence for pg_ripple.
 #
 # Runs a simplified insert-throughput + point-query benchmark and outputs
 # machine-readable results. Optionally compares against a stored baseline
@@ -26,18 +26,34 @@ BASELINE="${BASELINE_FILE:-}"
 
 echo "=== pg_ripple CI Performance Benchmark ==="
 echo "Database: $DB"
-echo "Regression threshold: ${THRESHOLD}%"
+if [[ -n "$BASELINE" ]]; then
+    echo "Regression threshold: ${THRESHOLD}%"
+fi
 echo ""
 
-# ── Reset extension ───────────────────────────────────────────────────────────
-psql -d "$DB" -q -c "DROP EXTENSION IF EXISTS pg_ripple CASCADE;"
-psql -d "$DB" -q -c "CREATE EXTENSION pg_ripple;"
+EXTENSION_VERSION=$(psql -X -v ON_ERROR_STOP=1 -d "$DB" -tAq \
+    -c "SELECT extversion FROM pg_extension WHERE extname = 'pg_ripple'")
+if [[ -z "$EXTENSION_VERSION" ]]; then
+    echo "pg_ripple is not installed in database $DB" >&2
+    exit 1
+fi
+EXISTING_TRIPLES=$(psql -X -v ON_ERROR_STOP=1 -d "$DB" -tAq \
+    -c "SELECT pg_ripple.triple_count()")
+if [[ "$EXISTING_TRIPLES" != "0" ]]; then
+    echo "benchmark requires an empty database; found $EXISTING_TRIPLES triples in $DB" >&2
+    exit 1
+fi
+POSTGRES_VERSION=$(psql -X -v ON_ERROR_STOP=1 -d "$DB" -tAq \
+    -c "SHOW server_version")
+GIT_SHA=$(git rev-parse --short=12 HEAD)
+MEASURED_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+BENCH_RUNNER="${BENCH_RUNNER:-local}"
 
 # ── Insert throughput: 100K triples ───────────────────────────────────────────
 # Uses 100K triples (not 1M) to keep CI runtime reasonable (~30s max).
 echo "Phase 1: Insert throughput (100,000 triples)..."
 
-INSERT_RESULT=$(psql -d "$DB" -t -A -q <<'SQL'
+INSERT_RESULT=$(psql -X -v ON_ERROR_STOP=1 -d "$DB" -t -A -q 2>&1 <<'SQL'
 DO $$
 DECLARE
     pred      INT;
@@ -92,7 +108,7 @@ echo ""
 # ── Point-query latency ──────────────────────────────────────────────────────
 echo "Phase 2: Point-query latency..."
 
-POINT_RESULT=$(psql -d "$DB" -t -A -q <<'SQL'
+POINT_RESULT=$(psql -X -v ON_ERROR_STOP=1 -d "$DB" -t -A -q 2>&1 <<'SQL'
 DO $$
 DECLARE
     t_start   TIMESTAMPTZ;
@@ -133,7 +149,7 @@ echo ""
 # ── SPARQL query latency ─────────────────────────────────────────────────────
 echo "Phase 3: SPARQL BGP query latency..."
 
-SPARQL_RESULT=$(psql -d "$DB" -t -A -q <<'SQL'
+SPARQL_RESULT=$(psql -X -v ON_ERROR_STOP=1 -d "$DB" -t -A -q 2>&1 <<'SQL'
 DO $$
 DECLARE
     t_start   TIMESTAMPTZ;
@@ -172,7 +188,12 @@ echo ""
 # ── Write results JSON ───────────────────────────────────────────────────────
 cat > "$RESULT_FILE" <<EOF
 {
-  "version": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
+  "version": "${EXTENSION_VERSION}",
+  "git_sha": "${GIT_SHA}",
+  "postgres_version": "${POSTGRES_VERSION}",
+  "measured_at": "${MEASURED_AT}",
+  "runner": "${BENCH_RUNNER}",
+  "fixture": "synthetic-100k-v1",
   "insert_throughput_triples_per_sec": ${INSERT_THROUGHPUT},
   "insert_total_triples": ${INSERT_TOTAL},
   "insert_elapsed_sec": ${INSERT_ELAPSED},
@@ -230,4 +251,3 @@ echo "=== CI Benchmark complete ==="
 # v0.87.0 note: probabilistic_overhead.sql and confidence_join_scale.sql
 # benchmarks require a running PG instance with test data; they are not run
 # in the automated CI loop by default. Run them manually with pgbench.
-

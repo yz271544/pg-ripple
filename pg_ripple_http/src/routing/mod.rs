@@ -7,8 +7,9 @@ use std::sync::Arc;
 
 use axum::Router;
 use axum::body::Body;
-use axum::extract::State;
-use axum::http::{HeaderMap, StatusCode};
+use axum::extract::{Request, State};
+use axum::http::{HeaderMap, Method, StatusCode};
+use axum::middleware::{Next, from_fn_with_state};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{delete, get, post, put};
 use serde::{Deserialize, Serialize};
@@ -19,7 +20,9 @@ use utoipa::OpenApi;
 pub mod middleware;
 
 use crate::arrow_encode::flight_do_get;
-use crate::common::{AppState, check_auth};
+use crate::common::{
+    AppState, check_auth, check_auth_admin, check_auth_metrics, check_auth_write, json_error,
+};
 // CQ-05 (v0.90.0): datalog handlers moved into the routing sub-module.
 // M15-14 (v0.96.0): datalog handlers split into sub-modules.
 pub(crate) mod datalog_admin;
@@ -34,7 +37,7 @@ use self::datalog_handlers as datalog;
 #[openapi(
     info(
         title = "pg_ripple_http",
-        version = "0.16.0",
+        version = "0.136.0",
         description = "SPARQL 1.1 Protocol HTTP endpoint and Datalog REST API for pg_ripple",
         license(name = "Apache-2.0")
     ),
@@ -63,6 +66,200 @@ pub(crate) const CT_SPARQL_QUERY: &str = "application/sparql-query";
 pub(crate) const CT_SPARQL_UPDATE: &str = "application/sparql-update";
 pub(crate) const CT_FORM: &str = "application/x-www-form-urlencoded";
 
+/// Central authorization class for every registered HTTP endpoint.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum AccessClass {
+    PublicHealth,
+    Read,
+    Write,
+    Admin,
+    Metrics,
+}
+
+/// Prefixes used by the route-access manifest. The request method refines
+/// mixed read/write namespaces in `classify_route`.
+pub const ROUTE_ACCESS_MANIFEST: &[(&str, AccessClass)] = &[
+    ("/health", AccessClass::PublicHealth),
+    ("/ready", AccessClass::PublicHealth),
+    ("/metrics", AccessClass::Metrics),
+    ("/admin/", AccessClass::Admin),
+    ("/explorer", AccessClass::Admin),
+    ("/sparql", AccessClass::Read),
+    ("/datalog/", AccessClass::Read),
+    ("/confidence/", AccessClass::Read),
+    ("/pagerank/", AccessClass::Read),
+    ("/centrality/", AccessClass::Read),
+    ("/rule-libraries", AccessClass::Read),
+    ("/rules/", AccessClass::Read),
+    ("/temporal/", AccessClass::Read),
+    ("/pprl/", AccessClass::Read),
+    ("/dp/", AccessClass::Read),
+    ("/entity-resolution/", AccessClass::Read),
+    ("/proof-tree/", AccessClass::Read),
+    ("/tenants", AccessClass::Read),
+    ("/federation/", AccessClass::Write),
+    ("/json-mapping/", AccessClass::Read),
+    ("/rag", AccessClass::Read),
+    ("/explain", AccessClass::Read),
+    ("/hypothetical", AccessClass::Read),
+    ("/flight/", AccessClass::Read),
+    ("/subscribe/", AccessClass::Read),
+    ("/void", AccessClass::Read),
+    ("/service", AccessClass::Read),
+    ("/openapi.yaml", AccessClass::Read),
+];
+
+/// Return the single authorization class for a registered route.
+pub fn classify_route(method: &Method, path: &str) -> Option<AccessClass> {
+    if matches!(path, "/health" | "/ready" | "/health/ready") {
+        return Some(AccessClass::PublicHealth);
+    }
+    if matches!(path, "/metrics" | "/metrics/extension") {
+        return Some(AccessClass::Metrics);
+    }
+    if path.starts_with("/admin/") || path == "/explorer" {
+        return Some(AccessClass::Admin);
+    }
+    if path.starts_with("/datalog/stats/") {
+        return Some(AccessClass::Admin);
+    }
+    if path == "/datalog/lattices" || path == "/datalog/views" {
+        return Some(if method == Method::GET {
+            AccessClass::Read
+        } else {
+            AccessClass::Admin
+        });
+    }
+    if path.starts_with("/datalog/views/") {
+        return Some(AccessClass::Admin);
+    }
+    if path.starts_with("/datalog/rules") || path.starts_with("/datalog/infer/") {
+        return Some(if method == Method::GET {
+            AccessClass::Read
+        } else {
+            AccessClass::Write
+        });
+    }
+    if path == "/datalog/query/x"
+        || path.starts_with("/datalog/query/")
+        || path == "/datalog/constraints"
+        || path.starts_with("/datalog/constraints/")
+    {
+        return Some(AccessClass::Read);
+    }
+    if path == "/sparql" {
+        // POST is deliberately write-authorized because the SPARQL protocol
+        // multiplexes queries and updates on this route.
+        return Some(if method == Method::GET {
+            AccessClass::Read
+        } else {
+            AccessClass::Write
+        });
+    }
+    if path == "/sparql/bindings" {
+        return Some(AccessClass::Read);
+    }
+    if path == "/sparql/stream"
+        || path == "/rag"
+        || path == "/explain"
+        || path == "/hypothetical"
+        || path == "/rules/draft"
+        || path == "/rules/validate"
+        || path.starts_with("/rules/")
+        || path == "/rule-conflicts/x"
+        || path.starts_with("/rule-conflicts/")
+        || path == "/flight/do_get"
+        || path.starts_with("/subscribe/")
+        || path == "/void"
+        || path == "/service"
+        || path == "/openapi.yaml"
+    {
+        return Some(AccessClass::Read);
+    }
+    if path == "/rule-libraries" || path.starts_with("/rule-libraries/") {
+        return Some(if path.ends_with("/subscribe") {
+            AccessClass::Write
+        } else {
+            AccessClass::Read
+        });
+    }
+    if path.starts_with("/confidence/") {
+        return Some(
+            if matches!(method, &Method::GET) && !path.ends_with("/load") {
+                AccessClass::Read
+            } else {
+                AccessClass::Write
+            },
+        );
+    }
+    if path.starts_with("/pagerank/") || path.starts_with("/centrality/") {
+        return Some(if method == Method::GET {
+            AccessClass::Read
+        } else {
+            AccessClass::Write
+        });
+    }
+    if path.starts_with("/temporal/") {
+        return Some(if method == Method::GET {
+            AccessClass::Read
+        } else {
+            AccessClass::Write
+        });
+    }
+    if path.starts_with("/pprl/")
+        || path.starts_with("/dp/")
+        || path.starts_with("/entity-resolution/")
+    {
+        return Some(if method == Method::GET {
+            AccessClass::Read
+        } else {
+            AccessClass::Write
+        });
+    }
+    if path.starts_with("/proof-tree/") {
+        return Some(AccessClass::Read);
+    }
+    if path == "/tenants" || path.starts_with("/tenants/") {
+        return Some(if method == Method::GET {
+            AccessClass::Read
+        } else {
+            AccessClass::Write
+        });
+    }
+    if path.starts_with("/federation/") {
+        return Some(AccessClass::Write);
+    }
+    if path.starts_with("/json-mapping/") {
+        return Some(if method == Method::GET {
+            AccessClass::Read
+        } else {
+            AccessClass::Write
+        });
+    }
+    None
+}
+
+async fn authorize_request(
+    State(state): State<Arc<AppState>>,
+    request: Request,
+    next: Next,
+) -> Response {
+    let Some(access) = classify_route(request.method(), request.uri().path()) else {
+        return json_error("PT404", "route is not registered", StatusCode::NOT_FOUND);
+    };
+    let result = match access {
+        AccessClass::PublicHealth => Ok(()),
+        AccessClass::Read => check_auth(&state, request.headers()),
+        AccessClass::Write => check_auth_write(&state, request.headers()),
+        AccessClass::Admin => check_auth_admin(&state, request.headers()),
+        AccessClass::Metrics => check_auth_metrics(&state, request.headers()),
+    };
+    if let Err(response) = result {
+        return response;
+    }
+    next.run(request).await
+}
+
 // ─── Query parameters ────────────────────────────────────────────────────────
 
 #[derive(Deserialize, Default)]
@@ -72,6 +269,8 @@ pub(crate) struct SparqlParams {
     /// Feature 12 (v0.120.0): when present and equal to "ok", read-only queries
     /// are proxied to the read-replica DSN (if configured).
     replica: Option<String>,
+    /// Optional caller deadline in milliseconds; the server-side maximum wins.
+    timeout_ms: Option<u64>,
 }
 
 // ─── RAG request / response ───────────────────────────────────────────────────
@@ -148,7 +347,7 @@ pub(crate) use sparql_handlers::{
 /// Build the application [`Router`] and apply middleware layers.
 ///
 /// Called from `main` after the [`AppState`] and CORS policy are constructed.
-pub(crate) fn build_router(state: Arc<AppState>, max_body_bytes: usize, cors: CorsLayer) -> Router {
+pub fn build_router(state: Arc<AppState>, max_body_bytes: usize, cors: CorsLayer) -> Router {
     Router::new()
         // SPARQL 1.1 Protocol
         .route(
@@ -156,6 +355,10 @@ pub(crate) fn build_router(state: Arc<AppState>, max_body_bytes: usize, cors: Co
             get(sparql_handlers::sparql_get).post(sparql_handlers::sparql_post),
         )
         .route("/sparql/stream", post(sparql_handlers::sparql_stream_post))
+        .route(
+            "/sparql/bindings",
+            post(sparql_handlers::sparql_bindings_post),
+        )
         .route("/rag", post(rag_handler::rag_post))
         .route("/health", get(admin_handlers::health))
         // v0.60.0 H7-5: Kubernetes readiness probe — 503 until first PG connection.
@@ -434,9 +637,44 @@ pub(crate) fn build_router(state: Arc<AppState>, max_body_bytes: usize, cors: Co
             "/json-mapping/{name}/writeback/status",
             get(json_mapping_handlers::json_mapping_writeback_status_get),
         )
+        .route(
+            "/json-mapping/{name}/writeback/config",
+            get(json_mapping_handlers::json_mapping_writeback_config_get),
+        )
         .layer(RequestBodyLimitLayer::new(max_body_bytes))
         .layer(cors)
+        .layer(from_fn_with_state(state.clone(), authorize_request))
         .with_state(state)
+}
+
+#[cfg(test)]
+mod access_tests {
+    use super::*;
+
+    #[test]
+    fn mixed_routes_use_the_strictest_class() {
+        assert_eq!(
+            classify_route(&Method::GET, "/sparql"),
+            Some(AccessClass::Read)
+        );
+        assert_eq!(
+            classify_route(&Method::POST, "/sparql"),
+            Some(AccessClass::Write)
+        );
+        assert_eq!(
+            classify_route(&Method::POST, "/datalog/rules/demo"),
+            Some(AccessClass::Write)
+        );
+        assert_eq!(
+            classify_route(&Method::GET, "/admin/diagnostic-snapshot"),
+            Some(AccessClass::Admin)
+        );
+        assert_eq!(
+            classify_route(&Method::GET, "/metrics"),
+            Some(AccessClass::Metrics)
+        );
+        assert_eq!(classify_route(&Method::GET, "/not-registered"), None);
+    }
 }
 
 // ─── v0.73.0 SUB-01: Live SPARQL subscription SSE endpoint ───────────────────

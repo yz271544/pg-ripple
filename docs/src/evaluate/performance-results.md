@@ -1,75 +1,62 @@
 # Performance and Conformance Results
 
-A summary of every benchmark and conformance test pg_ripple runs in CI, with links to the full result pages.
+This page distinguishes current fail-closed evidence from historical or informational checks.
 
----
+## Current conformance evidence
 
-## W3C standards conformance
-
-| Suite | Result | Reference |
+| Suite | Current result | CI role |
 |---|---|---|
-| **W3C SPARQL 1.1** | 100 % (smoke gate; full suite runs informationally) | [SPARQL Compliance Matrix](../reference/sparql-compliance.md) |
-| **W3C SHACL Core** | 100 % | [W3C Conformance](../reference/w3c-conformance.md) |
-| **W3C OWL 2 RL** | 100 % | [OWL 2 RL Results](../reference/owl2rl-results.md) |
-| **Apache Jena edge cases** (~1,000 tests) | Tracked in CI; informational until ≥95 % | [W3C Conformance](../reference/w3c-conformance.md) |
+| W3C SPARQL 1.1 | 324 / 324 locked cases pass | Required |
+| LUBM | 14 / 14 queries pass | Required |
+| Apache Jena | Reported by its suite | Informational |
+| WatDiv | 32 templates execute on an empty database | Execution check; no scale or latency claim |
+| OWL 2 RL | Pinned 489-case corpus downloads and validates | Source check only; no current conformance result |
 
-The first three are *blocking* CI gates — a release cannot ship if any drops below 100 %. The Apache Jena suite stays informational until pg_ripple confidently passes ≥ 95 %; reporting is honest about the current state.
+Feature matrices describe implemented behavior. They do not expand the scope of these test results.
 
----
+## Current performance evidence
 
-## Performance benchmarks
+The manual `Benchmark` workflow runs a bounded `synthetic-100k-v1` workload. It retains:
 
-| Benchmark | What it measures | Result |
-|---|---|---|
-| **WatDiv 10 M / 100 M** | SPARQL correctness + latency across 100 query templates (star, chain, snowflake, complex) | 100 % correctness; latency competitive with Virtuoso open-source on the same hardware. See [WatDiv Results](../reference/watdiv-results.md). |
-| **LUBM** | OWL RL inference correctness across 14 canonical queries | 14 / 14 pass. See [LUBM Results](../reference/lubm-results.md). |
-| **BSBM** | E-commerce-style mixed query workload | Regression gate in CI; numbers tracked per commit. |
-| **Bulk load** | Triples per second on commodity hardware | > 100 K triples/sec on a 4-core / 16 GB machine. |
-| **SPARQL latency** | Typical star pattern p50 | < 10 ms on a 100 M-triple store with warm cache. |
+- exact pg_ripple, PostgreSQL, and Git versions;
+- runner and operating-system details;
+- raw command output;
+- JSON containing insert throughput and average point-query and SPARQL BGP latency.
 
----
+The required BSBM job separately loads about one million triples from the repository's adapted fixture and fails on load, scale, or query errors. It records elapsed time but has no latency regression threshold.
 
-## Why the results matter
+The checked-in v0.136.0 run at commit `993af4fef88e` measured 5,666 inserted triples/s, 0.819 ms average point-query latency, and 0.277 ms average single-pattern SPARQL latency on an Apple M1 Pro. The [JSON, raw output, and sanitized environment](https://github.com/trickle-labs/pg-ripple/tree/main/benchmarks/results) are retained together. This is one bounded run, not a capacity or cross-system comparison.
 
-### 100 % conformance is the floor, not the ceiling
+Historical merge and PageRank CSV files have incompatible schemas and no retained raw evidence for current releases. They are not current baselines.
 
-A triple store that gets 95 % of W3C tests right has a 5 % chance of returning a wrong result for *your* query. That is not an academic concern — it is the difference between "always correct" and "occasionally surprising". pg_ripple's CI fails the build before merging anything that drops below 100 %.
+## Not yet qualified by current evidence
 
-### Performance numbers come from real machines, not marketing
+- production-scale or multi-node Citus performance;
+- WatDiv at 10 million or 100 million triples;
+- sustained HTTP, queue, or mixed read/write load;
+- current merge-worker, PageRank, vector, or hybrid-search comparisons;
+- long-duration soak, failover, restore, or PITR performance.
 
-Every benchmark on this page is run in GitHub Actions on a known instance type. The configuration, dataset, and harness are reproducible from the [`benchmarks/`](https://github.com/trickle-labs/pg-ripple/tree/main/benchmarks) directory. If you cannot reproduce a number, that is a bug — file an issue.
+Do not use repository data to make capacity claims for these paths. Measure the pinned build with the target dataset, hardware, and workload.
 
-### What we have *not* benchmarked
+## Run the bounded benchmark
 
-- Distributed (Citus) clusters at production scale. CI runs a small four-worker cluster; production-scale numbers are pending.
-- Federation latency to remote SPARQL endpoints. The variance is dominated by the remote endpoint, not by pg_ripple.
-- LLM end-to-end latency for `rag_context()` + chat completion. The LLM dominates; pg_ripple's contribution is sub-100 ms.
-
----
-
-## Running the benchmarks yourself
+Use a new empty database. The script refuses to run when triples already exist.
 
 ```bash
-# WatDiv (10 M triples)
-cd benchmarks/watdiv && ./run.sh
-
-# LUBM (14 queries)
-cd benchmarks && ./lubm.sh
-
-# Bulk load
-cd benchmarks && bash ci_benchmark.sh insert_throughput.sql
-
-# Vector index comparison
-cd benchmarks && bash ci_benchmark.sh vector_index_compare.sql
+createdb pg_ripple_benchmark
+psql -d pg_ripple_benchmark -c 'CREATE EXTENSION pg_ripple CASCADE'
+PGDATABASE=pg_ripple_benchmark \
+  BENCH_RUNNER=local \
+  RESULT_FILE=benchmark_results.json \
+  bash benchmarks/ci_benchmark.sh
 ```
 
-Most benchmarks run in under five minutes on a developer laptop; the full WatDiv 100 M takes ~30 minutes.
-
----
+See [`benchmarks/`](https://github.com/trickle-labs/pg-ripple/tree/main/benchmarks) for the harness and evidence requirements.
 
 ## See also
 
-- [Reference → SPARQL compliance matrix](../reference/sparql-compliance.md)
-- [Reference → WatDiv results](../reference/watdiv-results.md)
-- [Reference → LUBM results](../reference/lubm-results.md)
-- [Reference → OWL 2 RL results](../reference/owl2rl-results.md)
+- [SPARQL compliance matrix](../reference/sparql-compliance.md)
+- [WatDiv status](../reference/watdiv-results.md)
+- [LUBM results](../reference/lubm-results.md)
+- [OWL 2 RL source status](../reference/owl2rl-results.md)

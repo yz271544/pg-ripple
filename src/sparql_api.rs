@@ -1,6 +1,9 @@
 //! pg_ripple SQL API — SPARQL query engine, plan cache monitoring, FTS, HTAP maintenance
 
 #[pgrx::pg_schema]
+mod _pg_ripple {}
+
+#[pgrx::pg_schema]
 mod pg_ripple {
     use pgrx::prelude::*;
 
@@ -14,6 +17,19 @@ mod pg_ripple {
     fn sparql(query: &str) -> TableIterator<'static, (name!(result, pgrx::JsonB),)> {
         let rows = crate::sparql::sparql(query);
         TableIterator::new(rows.into_iter().map(|r| (r,)))
+    }
+
+    /// Execute a SELECT or ASK query with one typed initial-binding object.
+    #[pg_extern(name = "sparql")]
+    fn sparql_with_bindings(
+        query: &str,
+        bindings: pgrx::JsonB,
+    ) -> TableIterator<'static, (name!(result, pgrx::JsonB),)> {
+        TableIterator::new(
+            crate::sparql::sparql_with_bindings(query, &bindings.0)
+                .into_iter()
+                .map(|r| (r,)),
+        )
     }
 
     /// Execute a SPARQL ASK query; returns TRUE if any results exist.
@@ -61,6 +77,16 @@ mod pg_ripple {
         TableIterator::new(rows.into_iter().map(|r| (r,)))
     }
 
+    /// Execute CONSTRUCT with one typed initial-binding object.
+    #[pg_extern(name = "sparql_construct")]
+    fn sparql_construct_with_bindings(
+        query: &str,
+        bindings: pgrx::JsonB,
+    ) -> TableIterator<'static, (name!(result, pgrx::JsonB),)> {
+        let rows = crate::sparql::sparql_construct_with_bindings(query, &bindings.0);
+        TableIterator::new(rows.into_iter().map(|r| (r,)))
+    }
+
     /// Execute a SPARQL DESCRIBE query using the Concise Bounded Description algorithm.
     ///
     /// Returns one JSONB row per triple in the description.
@@ -71,6 +97,17 @@ mod pg_ripple {
         strategy: default!(&str, "'cbd'"),
     ) -> TableIterator<'static, (name!(result, pgrx::JsonB),)> {
         let rows = crate::sparql::sparql_describe(query, strategy);
+        TableIterator::new(rows.into_iter().map(|r| (r,)))
+    }
+
+    /// Execute DESCRIBE with one typed initial-binding object.
+    #[pg_extern(name = "sparql_describe")]
+    fn sparql_describe_with_bindings(
+        query: &str,
+        bindings: pgrx::JsonB,
+        strategy: default!(&str, "'cbd'"),
+    ) -> TableIterator<'static, (name!(result, pgrx::JsonB),)> {
+        let rows = crate::sparql::sparql_describe_with_bindings(query, &bindings.0, strategy);
         TableIterator::new(rows.into_iter().map(|r| (r,)))
     }
 
@@ -211,6 +248,18 @@ mod pg_ripple {
         TableIterator::new(crate::sparql::cursor::sparql_cursor(query))
     }
 
+    /// Stream a typed SELECT query constrained by one initial-binding object.
+    #[pg_extern(name = "sparql_cursor")]
+    fn sparql_cursor_with_bindings(
+        query: &str,
+        bindings: pgrx::JsonB,
+    ) -> TableIterator<'static, (name!(result, pgrx::JsonB),)> {
+        TableIterator::new(
+            crate::sparql::cursor::CursorIter::new_typed_with_bindings(query, &bindings.0)
+                .map(|row| (row,)),
+        )
+    }
+
     /// Stream a SPARQL CONSTRUCT query result as Turtle text chunks.
     ///
     /// Each returned row is a Turtle serialisation of up to 1024 triples.
@@ -227,6 +276,63 @@ mod pg_ripple {
     #[pg_extern]
     fn sparql_cursor_jsonld(query: &str) -> TableIterator<'static, (name!(chunk, String),)> {
         TableIterator::new(crate::sparql::cursor::sparql_cursor_jsonld(query))
+    }
+
+    /// Internal v0.134 metadata used to initialize streaming formatters.
+    #[pg_extern(schema = "_pg_ripple")]
+    fn sparql_stream_metadata(query: &str) -> pgrx::JsonB {
+        let query = crate::sparql::parse::preprocess_query(query);
+        let parsed = spargebra::SparqlParser::new()
+            .parse_query(&query)
+            .unwrap_or_else(|e| pgrx::error!("SPARQL parse error: {e}"));
+        let (form, variables) = match parsed {
+            spargebra::Query::Select { .. } => {
+                let (_, vars, ..) = crate::sparql::prepare_select(&query);
+                ("select", vars)
+            }
+            spargebra::Query::Ask { .. } => ("ask", vec!["result".to_owned()]),
+            spargebra::Query::Construct { .. } => ("construct", Vec::new()),
+            spargebra::Query::Describe { .. } => ("describe", Vec::new()),
+        };
+        pgrx::JsonB(serde_json::json!({"form": form, "variables": variables}))
+    }
+
+    /// Internal v0.134 lazy SELECT stream using SPARQL Results JSON bindings.
+    #[pg_extern(schema = "_pg_ripple")]
+    fn sparql_stream_bindings(
+        query: &str,
+    ) -> TableIterator<'static, (name!(result, pgrx::JsonB),)> {
+        TableIterator::new(crate::sparql::cursor::CursorIter::new_typed(query).map(|row| (row,)))
+    }
+
+    /// Internal v0.135 lazy SELECT stream with typed initial bindings.
+    #[pg_extern(schema = "_pg_ripple")]
+    fn sparql_stream_bindings_with_bindings(
+        query: &str,
+        bindings: pgrx::JsonB,
+    ) -> TableIterator<'static, (name!(result, pgrx::JsonB),)> {
+        TableIterator::new(
+            crate::sparql::cursor::CursorIter::new_typed_with_bindings(query, &bindings.0)
+                .map(|row| (row,)),
+        )
+    }
+
+    /// Internal v0.134 graph stream. Rows are N-Triples lines.
+    #[pg_extern(schema = "_pg_ripple")]
+    fn sparql_stream_triples(query: &str) -> TableIterator<'static, (name!(triple, String),)> {
+        TableIterator::new(crate::sparql::cursor::sparql_stream_triples(query).map(|row| (row,)))
+    }
+
+    /// Internal v0.135 graph stream with typed initial bindings.
+    #[pg_extern(schema = "_pg_ripple")]
+    fn sparql_stream_triples_with_bindings(
+        query: &str,
+        bindings: pgrx::JsonB,
+    ) -> TableIterator<'static, (name!(triple, String),)> {
+        TableIterator::new(
+            crate::sparql::cursor::sparql_stream_triples_with_bindings(query, &bindings.0)
+                .map(|row| (row,)),
+        )
     }
 
     // ── v0.40.0: explain_sparql returning JSONB ───────────────────────────────

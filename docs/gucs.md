@@ -1,5 +1,11 @@
 # pg_ripple GUC Reference
 
+For the complete reference, see [the reference GUC documentation](src/reference/guc-reference.md).
+
+`pg_ripple.llm_api_key_env` accepts only environment-variable names matching
+`^[A-Z_][A-Z0-9_]*$`. Raw values are rejected. During a pre-0.131 migration,
+a superuser may temporarily set `pg_ripple.llm_api_key_env_allow_raw = on`.
+
 > **Version**: v0.116.0  
 > All parameters are prefixed with `pg_ripple.` and configurable via `SET`, `postgresql.conf`, or `ALTER DATABASE/ROLE SET`.
 
@@ -40,7 +46,7 @@
 | `tombstone_gc_threshold` | integer | 10000 | Suset | Number of tombstones that trigger a GC cycle |
 | `tombstone_retention_seconds` | integer | 0 | Suset | Seconds to retain tombstones before GC eligibility (0 = immediate) |
 | `delta_index_threshold` | integer | 5000 | Suset | Delta-partition row count triggering automatic index creation |
-| `dict_vacuum_threshold` | integer | 10000 | Suset | Dictionary table dead-tuple threshold before auto-vacuum |
+| `dict_vacuum_threshold` | integer | 10000 | Suset | New-term threshold before automatic dictionary `ANALYZE` |
 | `vacuum_dict_batch_size` | integer | 200 | Suset | Batch size for incremental dictionary vacuum |
 | `auto_analyze` | bool | on | Suset | Enable automatic ANALYZE on VP tables after merge |
 | `stats_refresh_interval_seconds` | integer | 300 | Suset | Seconds between background stats-refresh cycles |

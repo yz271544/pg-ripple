@@ -1,6 +1,6 @@
 # Scalability Reference
 
-pg_ripple supports horizontal scalability via [Citus](https://www.citusdata.com/) for PostgreSQL.
+pg_ripple has experimental horizontal-sharding support via [Citus](https://www.citusdata.com/) for PostgreSQL. Current CI exercises graceful degradation without Citus; it does not create a multi-node cluster.
 
 ## Citus Integration
 
@@ -32,7 +32,8 @@ distributes VP tables across Citus worker nodes using the subject (`s`) column a
 
 ### Limitations
 
-- Citus multi-node integration tests are planned for v0.71.0 (CITUS-INT-01).
+- No current CI job installs Citus or runs a real multi-node cluster.
+- Rebalance, failover, cross-node write behavior, and capacity require workload-specific qualification.
 - Cross-shard property-path queries may not benefit from shard pruning.
 
 See also: [Performance Tuning](../operations/performance.md), [Architecture](architecture.md).

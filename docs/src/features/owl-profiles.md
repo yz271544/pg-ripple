@@ -36,9 +36,9 @@ SELECT pg_ripple.load_rules_builtin('owl-rl');
 SELECT pg_ripple.infer('owl-rl');
 ```
 
-Performance: the OWL 2 RL rule set has ~80 rules. On a 10 M-triple graph with a typical 1:1 T-Box / A-Box ratio, a full materialisation takes seconds with parallel stratum evaluation enabled.
+The OWL 2 RL rule set has about 80 rules. Measure materialization time on your ontology and data; the repository does not contain a current large-scale result.
 
-pg_ripple is **100 % conformant** with the W3C OWL 2 RL test suite — see [OWL 2 RL Conformance Results](../reference/owl2rl-results.md).
+Current CI validates acquisition of the pinned W3C OWL corpus but does not execute it. See [OWL 2 RL Source Status](../reference/owl2rl-results.md).
 
 ---
 

@@ -2,7 +2,7 @@
 
 **pg_ripple** turns your PostgreSQL database into a knowledge graph store — and into the foundation for AI applications that need *verifiable, structured, traceable* answers rather than hallucinated ones.
 
-You can build a chatbot that answers questions from your own knowledge base, deduplicate customer records across systems, validate data quality with formal rules, run OWL reasoning, and answer SPARQL queries over billions of triples — all inside the PostgreSQL you already operate, with no extra infrastructure.
+You can build a chatbot that answers questions from your own knowledge base, deduplicate customer records across systems, validate data quality with formal rules, run OWL reasoning, and answer SPARQL queries inside the PostgreSQL you already operate.
 
 ```sql
 -- Ask a natural-language question against your knowledge graph.
@@ -48,7 +48,7 @@ No separate graph store, no separate vector index, no separate schema registry. 
 
 | Capability | What it does |
 |---|---|
-| **SPARQL 1.1** | W3C standard graph query — full conformance, < 10 ms typical |
+| **SPARQL 1.1** | W3C standard graph query with a required 324-case suite |
 | **SHACL validation** | Define and enforce data-quality rules — reject bad data on insert |
 | **Datalog reasoning** | Derive new facts from RDFS, OWL RL/EL/QL, or custom rules |
 | **Vector + graph hybrid** | SPARQL traversal combined with pgvector HNSW similarity search |
@@ -65,11 +65,11 @@ No separate graph store, no separate vector index, no separate schema registry. 
 
 | Metric | Value |
 |---|---|
-| Bulk load throughput | > 100 K triples/sec (commodity hardware) |
-| SPARQL query latency | < 10 ms for typical star patterns |
-| W3C SPARQL 1.1 | 100 % conformance |
-| W3C SHACL Core | 100 % conformance |
-| W3C OWL 2 RL | 100 % conformance |
+| Current performance artifact | Bounded 100,000-triple synthetic workload |
+| BSBM execution gate | Adapted fixture, about 1 million triples |
+| W3C SPARQL 1.1 | 324 / 324 locked cases pass |
+| LUBM | 14 / 14 required queries pass |
+| W3C OWL 2 RL | Source acquisition only; no current pass rate |
 | PostgreSQL version | 18 |
 
 ---

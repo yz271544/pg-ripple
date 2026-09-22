@@ -65,6 +65,24 @@ unsafe extern "C-unwind" fn check_sparql_overflow_action(
     matches!(s, "warn" | "error")
 }
 
+unsafe extern "C-unwind" fn check_prefix_mode(
+    newval: *mut *mut std::ffi::c_char,
+    _extra: *mut *mut std::ffi::c_void,
+    _source: pgrx::pg_sys::GucSource::Type,
+) -> bool {
+    if newval.is_null() {
+        return true;
+    }
+    // SAFETY: newval is a GUC check-hook argument; valid for this call.
+    let value = unsafe {
+        if (*newval).is_null() {
+            return true;
+        }
+        std::ffi::CStr::from_ptr(*newval).to_str().unwrap_or("")
+    };
+    matches!(value, "strict" | "registered")
+}
+
 /// Validate `tracing_exporter`: `stdout` or `otlp`.
 #[pg_guard]
 unsafe extern "C-unwind" fn check_tracing_exporter(
@@ -118,6 +136,43 @@ pub fn register() {
         GucFlags::default(),
     );
 
+    // SAFETY: pgrx exposes this hook registration through an unsafe FFI boundary.
+    unsafe {
+        pgrx::GucRegistry::define_string_guc_with_hooks(
+            c"pg_ripple.sparql_prefix_mode",
+            c"SPARQL prefix policy: 'strict' or 'registered' (default: strict)",
+            c"",
+            &SPARQL_PREFIX_MODE,
+            GucContext::Userset,
+            GucFlags::default(),
+            Some(check_prefix_mode),
+            None,
+            None,
+        );
+    }
+
+    pgrx::GucRegistry::define_int_guc(
+        c"pg_ripple.sparql_max_initial_bindings",
+        c"Maximum variables accepted in one typed SPARQL binding object (default: 64)",
+        c"",
+        &SPARQL_MAX_INITIAL_BINDINGS,
+        0,
+        1024,
+        GucContext::Userset,
+        GucFlags::default(),
+    );
+
+    pgrx::GucRegistry::define_int_guc(
+        c"pg_ripple.sparql_max_binding_value_bytes",
+        c"Maximum UTF-8 bytes in one typed SPARQL binding value (default: 1 MiB)",
+        c"",
+        &SPARQL_MAX_BINDING_VALUE_BYTES,
+        1,
+        64 * 1024 * 1024,
+        GucContext::Userset,
+        GucFlags::default(),
+    );
+
     pgrx::GucRegistry::define_int_guc(
         c"pg_ripple.plan_cache_size",
         c"Maximum number of cached SPARQL-to-SQL plan translations per backend (0 = disabled)",
@@ -136,6 +191,17 @@ pub fn register() {
         &MAX_PATH_DEPTH,
         0,
         10000,
+        GucContext::Userset,
+        GucFlags::default(),
+    );
+
+    pgrx::GucRegistry::define_int_guc(
+        c"pg_ripple.max_predicate_union_branches",
+        c"Maximum VP-table branches for variable-predicate queries (default: 500)",
+        c"",
+        &MAX_PREDICATE_UNION_BRANCHES,
+        10,
+        10_000,
         GucContext::Userset,
         GucFlags::default(),
     );

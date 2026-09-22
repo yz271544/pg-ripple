@@ -159,6 +159,7 @@ fn encode_inner(term: &str, kind: i16) -> i64 {
     // NULL (possible during concurrent dictionary truncation or a genuine hash
     // collision), raise a PostgreSQL error rather than panicking.  The CTE also
     // returns the `inserted` flag so callers can emit a debug notice on conflict.
+    crate::error::fault_injection::hit("dictionary_insert");
     let id: i64 = Spi::get_one_with_args::<i64>(
         "WITH ins AS ( \
              INSERT INTO _pg_ripple.dictionary (hash_hi, hash_lo, value, kind) \
@@ -189,6 +190,7 @@ fn encode_inner(term: &str, kind: i16) -> i64 {
     });
 
     // Populate both caches.
+    crate::error::fault_injection::hit("dictionary_cache_publish");
     crate::shmem::encode_cache_insert(hash128, id);
     TX_SHMEM_INSERTS.with(|v| v.borrow_mut().push(hash128));
     ENCODE_CACHE.with(|c| c.borrow_mut().put(hash128, id));
@@ -471,12 +473,12 @@ pub fn encode_batch(terms_and_kinds: &[(&str, i16)]) -> Vec<i64> {
         .collect()
 }
 
-/// After a bulk encode, run `VACUUM ANALYZE _pg_ripple.dictionary` if the
+/// After a bulk encode, run `ANALYZE _pg_ripple.dictionary` if the
 /// number of new terms exceeds `pg_ripple.dict_vacuum_threshold`.
 ///
 /// Called by the bulk loader after `encode_batch` to keep planner statistics
 /// fresh without waiting for the autovacuum daemon. (M15-07, v0.95.0)
-pub(crate) fn maybe_vacuum_dictionary(new_terms: usize) {
+pub(crate) fn maybe_analyze_dictionary(new_terms: usize) {
     let threshold = crate::gucs::storage::DICT_VACUUM_THRESHOLD.get();
     if threshold <= 0 {
         return; // VACUUM disabled by GUC.
@@ -486,10 +488,10 @@ pub(crate) fn maybe_vacuum_dictionary(new_terms: usize) {
     }
     pgrx::debug1!(
         "dict_vacuum_threshold reached ({new_terms} new terms ≥ {threshold}): \
-         running VACUUM ANALYZE _pg_ripple.dictionary"
+         running ANALYZE _pg_ripple.dictionary"
     );
-    if let Err(e) = pgrx::Spi::run("VACUUM ANALYZE _pg_ripple.dictionary") {
-        pgrx::warning!("dictionary VACUUM ANALYZE failed (non-fatal): {e}");
+    if let Err(e) = pgrx::Spi::run("ANALYZE _pg_ripple.dictionary") {
+        pgrx::warning!("dictionary ANALYZE failed (non-fatal): {e}");
     }
 }
 
@@ -696,11 +698,13 @@ pub fn is_blank_node(id: i64) -> bool {
 }
 
 /// Full decoded representation of a dictionary entry.
+#[derive(Clone)]
 pub struct TermInfo {
     pub value: String,
     pub kind: i16,
     pub datatype: Option<String>,
     pub lang: Option<String>,
+    pub quoted_triple: Option<(i64, i64, i64)>,
 }
 
 /// Decode a dictionary `id` to its full representation (value, kind, datatype, lang).
@@ -710,7 +714,7 @@ pub fn decode_full(id: i64) -> Option<TermInfo> {
     Spi::connect(|client| {
         client
             .select(
-                "SELECT value, kind, datatype, lang \
+                "SELECT value, kind, datatype, lang, qt_s, qt_p, qt_o \
                  FROM _pg_ripple.dictionary WHERE id = $1",
                 Some(1),
                 &[DatumWithOid::from(id)],
@@ -721,11 +725,20 @@ pub fn decode_full(id: i64) -> Option<TermInfo> {
                 let kind: i16 = row.get::<i16>(2).ok().flatten()?;
                 let datatype: Option<String> = row.get::<String>(3).ok().flatten();
                 let lang: Option<String> = row.get::<String>(4).ok().flatten();
+                let quoted_triple = match (
+                    row.get::<i64>(5).ok().flatten(),
+                    row.get::<i64>(6).ok().flatten(),
+                    row.get::<i64>(7).ok().flatten(),
+                ) {
+                    (Some(s), Some(p), Some(o)) => Some((s, p, o)),
+                    _ => None,
+                };
                 Some(TermInfo {
                     value,
                     kind,
                     datatype,
                     lang,
+                    quoted_triple,
                 })
             })
             .next()

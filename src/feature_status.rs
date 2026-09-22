@@ -11,6 +11,7 @@
 //! - `manual_refresh`— feature is correct only when a manual refresh is invoked
 //! - `stub`          — API exists but production behavior is not implemented
 //! - `degraded`      — dependency or configuration is missing; fallback is active
+//! - `broken`        — known correctness defect; do not rely on this in production
 //! - `planned`       — roadmap item exists, no user-facing implementation
 
 #[pgrx::pg_schema]
@@ -461,9 +462,10 @@ mod pg_ripple {
                 ),
                 Some("ci/regress: json_mapping.sql".to_string()),
                 Some("docs/src/features/loading-data.md".to_string()),
-                Some("src/json_mapping.rs".to_string()),
+                Some("src/json_mapping/mod.rs".to_string()),
             ),
-            // ── JSON mapping relational writeback (v0.128.0 JSON-WRITEBACK-01) ─
+            // ── JSON mapping relational writeback (v0.128.0 JSON-WRITEBACK-01;
+            // repaired by v0.129.0 A18 remediation) ──────────────────────────
             (
                 "json_mapping_writeback".to_string(),
                 "implemented".to_string(),
@@ -471,15 +473,24 @@ mod pg_ripple {
                 Some(
                     "JSON-WRITEBACK-01 (v0.128.0): writeback_json_row() / \
                      writeback_json_row_delete() propagate RDF graph changes back to \
-                     the source relational table. enable_json_writeback() installs VP \
-                     delta triggers for automatic async queueing. \
+                     the source relational table; enable_json_writeback() installs \
+                     triggers for automatic async writeback via a queue. v0.129.0 A18 \
+                     remediation (C18-01 / H18-02): fixed a wrong dictionary column name \
+                     that made the async path silently non-functional, made predicate \
+                     lookup failures fatal instead of swallowed, report real \
+                     affected-row counts, cast values to the target column's real type \
+                     instead of blanket ::text, validate writeback_key_columns up front, \
+                     and extended enqueue coverage to not-yet-promoted predicates \
+                     (vp_rare) and main-resident deletes (*_tombstones) so \
+                     enable_json_writeback() no longer requires a predicate to already \
+                     be promoted to its own VP table. \
                      Conflict policies: replace (upsert), skip, error. \
                      GUC: pg_ripple.json_writeback_batch_size (default 100)."
                         .to_string(),
                 ),
                 Some("ci/regress: v0128_json_writeback.sql".to_string()),
                 Some("docs/src/features/json-mapping.md".to_string()),
-                Some("src/json_mapping.rs".to_string()),
+                Some("src/json_mapping/mod.rs".to_string()),
             ),
             // ── VP promotion recovery monitoring (v0.74.0 PROMO-RECOVER-01) ──
             (
@@ -812,6 +823,44 @@ mod pg_ripple {
         ];
 
         TableIterator::new(rows)
+    }
+
+    /// Return the frozen v1 query interface and its explicit limits.
+    #[pg_extern]
+    pub fn supported_surface(
+        profile: &str,
+    ) -> TableIterator<
+        'static,
+        (
+            name!(feature_name, String),
+            name!(optional_dependency, Option<String>),
+            name!(unsupported_combination, Option<String>),
+            name!(evidence_artifact, String),
+        ),
+    > {
+        if profile != "v1" {
+            pgrx::error!("unknown supported surface profile '{profile}'; expected 'v1'");
+        }
+        TableIterator::new(vec![
+            (
+                "typed_initial_bindings".to_owned(),
+                None,
+                Some("SPARQL UPDATE, blank-node, and RDF-star bindings".to_owned()),
+                "api/stable-v1.json".to_owned(),
+            ),
+            (
+                "registered_prefix_mode".to_owned(),
+                None,
+                Some("strict mode does not resolve undeclared prefixes".to_owned()),
+                "api/stable-v1.json".to_owned(),
+            ),
+            (
+                "http_bindings".to_owned(),
+                Some("pg_ripple_http".to_owned()),
+                Some("requires pg_ripple_http >= 0.135.0".to_owned()),
+                "api/stable-v1.json".to_owned(),
+            ),
+        ])
     }
 }
 

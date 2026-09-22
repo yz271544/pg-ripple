@@ -118,6 +118,12 @@ pub fn ensure_htap_tables(pred_id: i64) -> String {
     )
     .unwrap_or_else(|e| pgrx::error!("delta index(o,s) error: {e}"));
 
+    Spi::run_with_args(
+        &format!("CREATE INDEX IF NOT EXISTS idx_vp_{pred_id}_delta_i ON {delta} (i)"),
+        &[],
+    )
+    .unwrap_or_else(|e| pgrx::error!("delta index(i) error: {e}"));
+
     // Main table — read-optimised.
     Spi::run_with_args(
         &format!(
@@ -140,6 +146,12 @@ pub fn ensure_htap_tables(pred_id: i64) -> String {
         &[],
     )
     .unwrap_or_else(|e| pgrx::error!("main BRIN index error: {e}"));
+
+    Spi::run_with_args(
+        &format!("CREATE INDEX IF NOT EXISTS idx_vp_{pred_id}_main_i ON {main} (i)"),
+        &[],
+    )
+    .unwrap_or_else(|e| pgrx::error!("main index(i) error: {e}"));
 
     // Tombstones table — pending deletes from main.
     // Column `i` records the SID at insert time; used by merge_predicate to
@@ -282,6 +294,7 @@ pub fn delta_table(pred_id: i64) -> Option<String> {
 ///
 /// Returns the number of rows in the new main table.
 pub fn merge_predicate(pred_id: i64) -> i64 {
+    crate::error::fault_injection::hit("merge_phase_start");
     if !is_htap(pred_id) {
         return 0;
     }
@@ -374,6 +387,11 @@ pub fn merge_predicate(pred_id: i64) -> i64 {
         &[],
     )
     .unwrap_or_else(|e| pgrx::error!("merge: BRIN index on main_new error: {e}"));
+    Spi::run_with_args(
+        &format!("CREATE INDEX idx_vp_{pred_id}_main_new_i ON {main_new} (i)"),
+        &[],
+    )
+    .unwrap_or_else(|e| pgrx::error!("merge: B-tree index on main_new error: {e}"));
 
     // Count rows before rename (for return value).
     let row_count: i64 =
@@ -400,6 +418,7 @@ pub fn merge_predicate(pred_id: i64) -> i64 {
     // advisory locks held by Citus, pg_partman, or other extensions.
     // The global key 0x5052_5000 itself is reserved for Citus rebalance events.
     // lock_key = 0x5052_5000 + pred_id (wrapping to stay within i64 range).
+    crate::error::fault_injection::hit("merge_phase_swap");
     const MERGE_FENCE_NAMESPACE: i64 = 0x5052_5000;
     let merge_lock_key = MERGE_FENCE_NAMESPACE.wrapping_add(pred_id);
     Spi::run_with_args(
@@ -461,6 +480,14 @@ pub fn merge_predicate(pred_id: i64) -> i64 {
         &[],
     )
     .unwrap_or_else(|e| pgrx::warning!("merge: rename BRIN index error (non-fatal): {e}"));
+    Spi::run_with_args(
+        &format!(
+            "ALTER INDEX IF EXISTS _pg_ripple.idx_vp_{pred_id}_main_new_i \
+             RENAME TO idx_vp_{pred_id}_main_i"
+        ),
+        &[],
+    )
+    .unwrap_or_else(|e| pgrx::warning!("merge: rename B-tree index error (non-fatal): {e}"));
 
     // Re-summarize BRIN index so page-range summaries are valid immediately
     // without waiting for the autovacuum BRIN worker.
@@ -637,6 +664,7 @@ pub fn merge_predicate(pred_id: i64) -> i64 {
             .unwrap_or(0);
     notify_merge_lifecycle(pred_id, row_count, tombs_remaining);
 
+    crate::error::fault_injection::hit("merge_phase_complete");
     row_count
 }
 
@@ -875,6 +903,12 @@ pub fn migrate_flat_to_htap(pred_id: i64) {
     )
     .unwrap_or_else(|e| pgrx::error!("htap_migrate: delta index(o,s) error: {e}"));
 
+    Spi::run_with_args(
+        &format!("CREATE INDEX idx_vp_{pred_id}_delta_i ON {delta} (i)"),
+        &[],
+    )
+    .unwrap_or_else(|e| pgrx::error!("htap_migrate: delta index(i) error: {e}"));
+
     // Create empty main table.
     Spi::run_with_args(
         &format!(
@@ -895,6 +929,12 @@ pub fn migrate_flat_to_htap(pred_id: i64) {
         &[],
     )
     .unwrap_or_else(|e| pgrx::error!("htap_migrate: main BRIN index error: {e}"));
+
+    Spi::run_with_args(
+        &format!("CREATE INDEX idx_vp_{pred_id}_main_i ON {main} (i)"),
+        &[],
+    )
+    .unwrap_or_else(|e| pgrx::error!("htap_migrate: main index(i) error: {e}"));
 
     // Create empty tombstones table.
     Spi::run_with_args(

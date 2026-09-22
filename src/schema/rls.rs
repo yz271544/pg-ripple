@@ -733,3 +733,37 @@ INSERT INTO _pg_ripple.schema_version (version, upgraded_from, installed_at)
     name = "v098_schema_additions",
     requires = ["v097_schema_additions"]
 );
+
+// v0.133.0: keep the schema ledger current for fresh installs.  Releases
+// after v0.98.0 were Rust-only, so this stamp also repairs health()'s
+// migration status for newly created databases.
+pgrx::extension_sql!(
+    "INSERT INTO _pg_ripple.schema_version (version, upgraded_from, installed_at) \
+     VALUES ('0.133.0', '0.132.0', clock_timestamp());",
+    name = "v133_schema_version_stamp",
+    requires = ["v098_schema_additions"]
+);
+
+// v0.134.0: keep the schema ledger current for fresh installs.
+// The release adds portal-backed streaming entry points and requires no
+// additional table changes.
+pgrx::extension_sql!(
+    "INSERT INTO _pg_ripple.schema_version (version, upgraded_from, installed_at) \
+     VALUES ('0.134.0', '0.133.0', clock_timestamp());",
+    name = "v134_schema_version_stamp",
+    requires = ["v133_schema_version_stamp"]
+);
+
+pgrx::extension_sql!(
+    "INSERT INTO _pg_ripple.schema_version (version, upgraded_from, installed_at) \
+     VALUES ('0.135.0', '0.134.0', clock_timestamp());",
+    name = "v135_schema_version_stamp",
+    requires = ["v134_schema_version_stamp"]
+);
+
+pgrx::extension_sql!(
+    "INSERT INTO _pg_ripple.schema_version (version, upgraded_from, installed_at) \
+     VALUES ('0.136.0', '0.135.0', clock_timestamp());",
+    name = "v136_schema_version_stamp",
+    requires = ["v135_schema_version_stamp"]
+);

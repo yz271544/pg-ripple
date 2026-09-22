@@ -274,19 +274,19 @@ pub(super) fn register_late() {
     pgrx::GucRegistry::define_bool_guc(
         c"pg_ripple.bulk_load_use_copy",
         c"When on (default), bulk loaders use UNNEST-array batch INSERTs for \
-          triple insertion instead of per-row VALUES INSERTs. Delivers 5-10x \
-          throughput improvement for large loads. (H16-05 v0.113.0). Default: on.",
+          triple insertion instead of per-row VALUES INSERTs. \
+          (H16-05 v0.113.0). Default: on.",
         c"",
         &crate::gucs::storage::BULK_LOAD_USE_COPY,
         GucContext::Userset,
         GucFlags::default(),
     );
 
-    // M15-07 (v0.95.0): scheduled VACUUM ANALYZE on dictionary after bulk encode.
+    // M15-07 (v0.95.0): scheduled ANALYZE on dictionary after bulk encode.
     pgrx::GucRegistry::define_int_guc(
         c"pg_ripple.dict_vacuum_threshold",
         c"Minimum number of new dictionary terms inserted in a batch before \
-          VACUUM ANALYZE _pg_ripple.dictionary is run automatically. \
+          ANALYZE _pg_ripple.dictionary is run automatically. \
           Set to 0 to disable. (M15-07 v0.95.0). Default: 10000. Range: 0–10000000.",
         c"",
         &crate::gucs::storage::DICT_VACUUM_THRESHOLD,

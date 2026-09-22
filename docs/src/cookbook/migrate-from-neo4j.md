@@ -254,7 +254,7 @@ FROM pg_ripple.sparql('SELECT (COUNT(*) AS ?count) WHERE { ?s ?p ?o }');
 
 ## Performance Tips
 
-1. **Batch load** with `bulk_load_turtle_file()` — 10–100× faster than individual inserts.
+1. **Batch load** with `bulk_load_turtle_file()` to avoid per-call overhead from individual inserts.
 2. **Set `pg_ripple.vp_promotion_threshold = 100`** during migration to create individual VP tables for more predicates, then restore the default after.
 3. **Run `VACUUM ANALYZE`** on `_pg_ripple.dictionary` after a large load.
 4. **Use `pg_ripple.run_merge()`** to flush deltas to the main partition before heavy analytic queries.

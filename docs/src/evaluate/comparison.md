@@ -20,7 +20,7 @@ A dispassionate side-by-side. Pick the technology that fits your team and constr
 | HTTP / SPARQL Protocol | `pg_ripple_http` | None | Built-in | Built-in (Cypher over HTTP) | REST |
 | Federation | SPARQL `SERVICE` + vector federation | None | SPARQL `SERVICE` | None | Some |
 | Operational expertise | PostgreSQL DBA skills transfer | PostgreSQL DBA | Specialised triple-store ops | Specialised graph ops | Vendor-specific |
-| Conformance | W3C SPARQL 1.1, SHACL Core, OWL 2 RL: 100 % | n/a | Varies | n/a | n/a |
+| Standards evidence | 324 / 324 locked W3C SPARQL cases; 14 / 14 LUBM queries; OWL corpus source check | n/a | Varies | n/a | n/a |
 
 ---
 
@@ -40,7 +40,7 @@ A dispassionate side-by-side. Pick the technology that fits your team and constr
 
 | Situation | Better fit |
 |---|---|
-| > 1 B triples, single instance | Distributed triple stores (or pg_ripple + Citus, see [Scaling](../operations/scaling.md)) |
+| Multi-node production scale required today | A distributed store with production evidence; pg_ripple Citus support is experimental |
 | Existing Cypher / GQL codebase, no plans to learn SPARQL | Neo4j / Memgraph |
 | Pure vector search, no graph traversal | pgvector by itself, or Pinecone/Qdrant if you need a managed service |
 | Streaming graph analytics over append-only event firehose | Apache Flink + a graph library |

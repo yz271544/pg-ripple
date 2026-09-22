@@ -1,6 +1,7 @@
 //! Storage ops: scan, query, graph management, SID API (M15-13, v0.96.0).
 //! Moved from storage/ops/mod.rs lines 492-1615.
 //! v0.122.0 H17-02: deduplication helpers extracted to `dedup.rs`.
+// @allow-large-file: scan and SID operations remain consolidated for shared query paths
 
 #[path = "dedup.rs"]
 pub(super) mod dedup;
@@ -211,19 +212,26 @@ pub fn for_each_encoded_triple_batch(
 
     for p_id in pred_ids {
         let table = format!("_pg_ripple.vp_{p_id}");
-        let g_filter = match graph {
-            Some(gid) => format!(" WHERE g = {gid}"),
-            None => String::new(),
-        };
-        // Use OFFSET-based pagination inside a single SPI::connect to avoid
-        // repeated connection overhead.  Each page fetches `batch_size` rows
-        // ordered by the monotonically-increasing SID column `i`.
-        let mut offset = 0usize;
+        // Keyset pagination keeps each page indexable even when a graph has
+        // millions of triples; OFFSET would rescan and discard every prior page.
+        let mut last_i = None;
         loop {
+            let mut filters = Vec::new();
+            if let Some(gid) = graph {
+                filters.push(format!("g = {gid}"));
+            }
+            if let Some(i) = last_i {
+                filters.push(format!("i > {i}"));
+            }
+            let where_clause = if filters.is_empty() {
+                String::new()
+            } else {
+                format!(" WHERE {}", filters.join(" AND "))
+            };
             let sql = format!(
-                "SELECT s, o, g FROM {table}{g_filter} ORDER BY i LIMIT {batch_size} OFFSET {offset}"
+                "SELECT s, o, g, i FROM {table}{where_clause} ORDER BY i LIMIT {batch_size}"
             );
-            let page: Vec<(i64, i64, i64, i64)> = Spi::connect(|c| {
+            let page: Vec<(i64, i64, i64, i64, i64)> = Spi::connect(|c| {
                 c.select(&sql, None, &[])
                     .unwrap_or_else(|e| {
                         pgrx::error!("for_each_encoded_triple_batch VP scan SPI error: {e}")
@@ -232,8 +240,9 @@ pub fn for_each_encoded_triple_batch(
                         let s: Option<i64> = row.get(1).ok().flatten();
                         let o: Option<i64> = row.get(2).ok().flatten();
                         let g: Option<i64> = row.get(3).ok().flatten();
-                        match (s, o, g) {
-                            (Some(s), Some(o), Some(g)) => Some((s, p_id, o, g)),
+                        let i: Option<i64> = row.get(4).ok().flatten();
+                        match (s, o, g, i) {
+                            (Some(s), Some(o), Some(g), Some(i)) => Some((s, p_id, o, g, i)),
                             _ => None,
                         }
                     })
@@ -241,26 +250,35 @@ pub fn for_each_encoded_triple_batch(
             });
             let page_len = page.len();
             if !page.is_empty() {
-                callback(&page);
+                let triples: Vec<_> = page.iter().map(|&(s, p, o, g, _)| (s, p, o, g)).collect();
+                callback(&triples);
+                last_i = page.last().map(|row| row.4);
             }
             if page_len < batch_size {
                 break;
             }
-            offset += batch_size;
         }
     }
 
     // ── vp_rare ───────────────────────────────────────────────────────────────
-    let g_filter = match graph {
-        Some(gid) => format!(" WHERE g = {gid}"),
-        None => String::new(),
-    };
-    let mut offset = 0usize;
+    let mut last_i = None;
     loop {
+        let mut filters = Vec::new();
+        if let Some(gid) = graph {
+            filters.push(format!("g = {gid}"));
+        }
+        if let Some(i) = last_i {
+            filters.push(format!("i > {i}"));
+        }
+        let where_clause = if filters.is_empty() {
+            String::new()
+        } else {
+            format!(" WHERE {}", filters.join(" AND "))
+        };
         let sql = format!(
-            "SELECT p, s, o, g FROM _pg_ripple.vp_rare{g_filter} ORDER BY i LIMIT {batch_size} OFFSET {offset}"
+            "SELECT p, s, o, g, i FROM _pg_ripple.vp_rare{where_clause} ORDER BY i LIMIT {batch_size}"
         );
-        let page: Vec<(i64, i64, i64, i64)> = Spi::connect(|c| {
+        let page: Vec<(i64, i64, i64, i64, i64)> = Spi::connect(|c| {
             c.select(&sql, None, &[])
                 .unwrap_or_else(|e| {
                     pgrx::error!("for_each_encoded_triple_batch vp_rare scan SPI error: {e}")
@@ -270,8 +288,9 @@ pub fn for_each_encoded_triple_batch(
                     let s: Option<i64> = row.get(2).ok().flatten();
                     let o: Option<i64> = row.get(3).ok().flatten();
                     let g: Option<i64> = row.get(4).ok().flatten();
-                    match (p, s, o, g) {
-                        (Some(p), Some(s), Some(o), Some(g)) => Some((s, p, o, g)),
+                    let i: Option<i64> = row.get(5).ok().flatten();
+                    match (p, s, o, g, i) {
+                        (Some(p), Some(s), Some(o), Some(g), Some(i)) => Some((s, p, o, g, i)),
                         _ => None,
                     }
                 })
@@ -279,12 +298,13 @@ pub fn for_each_encoded_triple_batch(
         });
         let page_len = page.len();
         if !page.is_empty() {
-            callback(&page);
+            let triples: Vec<_> = page.iter().map(|&(s, p, o, g, _)| (s, p, o, g)).collect();
+            callback(&triples);
+            last_i = page.last().map(|row| row.4);
         }
         if page_len < batch_size {
             break;
         }
-        offset += batch_size;
     }
 }
 
@@ -567,12 +587,32 @@ pub fn list_graphs() -> Vec<String> {
 
 /// Register (or update) an IRI prefix abbreviation.
 pub fn register_prefix(prefix: &str, expansion: &str) {
+    validate_prefix(prefix, expansion);
+    ensure_prefix_mutation_authorized();
     Spi::run_with_args(
-        "INSERT INTO _pg_ripple.prefixes (prefix, expansion) VALUES ($1, $2) \
-         ON CONFLICT (prefix) DO UPDATE SET expansion = EXCLUDED.expansion",
+        "INSERT INTO _pg_ripple.prefixes (prefix, expansion, owner_oid) VALUES ($1, $2, (current_user::regrole)::oid) \
+         ON CONFLICT (prefix) DO UPDATE SET expansion = EXCLUDED.expansion, updated_at = now()",
         &[DatumWithOid::from(prefix), DatumWithOid::from(expansion)],
     )
     .unwrap_or_else(|e| pgrx::error!("register_prefix SPI error: {e}"));
+    bump_prefix_generation();
+}
+
+/// Drop a registered prefix, returning whether a row was removed.
+pub fn drop_prefix(prefix: &str) -> bool {
+    validate_prefix_label(prefix);
+    ensure_prefix_mutation_authorized();
+    let removed = Spi::get_one_with_args::<bool>(
+        "WITH deleted AS (DELETE FROM _pg_ripple.prefixes WHERE prefix = $1 RETURNING 1) \
+         SELECT EXISTS (SELECT 1 FROM deleted)",
+        &[DatumWithOid::from(prefix)],
+    )
+    .unwrap_or_else(|e| pgrx::error!("drop_prefix SPI error: {e}"))
+    .unwrap_or(false);
+    if removed {
+        bump_prefix_generation();
+    }
+    removed
 }
 
 /// Return all registered prefix → expansion pairs.
@@ -594,6 +634,78 @@ pub fn list_prefixes() -> Vec<(String, String)> {
         })
         .collect()
     })
+}
+
+/// Return the committed registry generation visible to this transaction.
+pub fn prefix_registry_generation() -> i64 {
+    Spi::get_one::<i64>("SELECT generation FROM _pg_ripple.prefix_registry_state WHERE singleton")
+        .unwrap_or_else(|e| pgrx::error!("prefix registry generation SPI error: {e}"))
+        .unwrap_or(1)
+}
+
+fn bump_prefix_generation() {
+    Spi::run(
+        "UPDATE _pg_ripple.prefix_registry_state SET generation = generation + 1 WHERE singleton",
+    )
+    .unwrap_or_else(|e| pgrx::error!("prefix registry generation update error: {e}"));
+}
+
+fn validate_prefix(prefix: &str, expansion: &str) {
+    validate_prefix_label(prefix);
+    let bytes = expansion.as_bytes();
+    let scheme_end = expansion.find(':').unwrap_or(0);
+    if scheme_end == 0
+        || !expansion[..scheme_end].chars().enumerate().all(|(i, c)| {
+            if i == 0 {
+                c.is_ascii_alphabetic()
+            } else {
+                c.is_ascii_alphanumeric() || matches!(c, '+' | '-' | '.')
+            }
+        })
+        || expansion.chars().any(|c| {
+            c.is_whitespace() || c.is_control() || matches!(c, '<' | '>' | '"' | '\'' | ';')
+        })
+    {
+        pgrx::error!("PT0577: invalid prefix expansion IRI");
+    }
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] == b'%'
+            && (i + 2 >= bytes.len()
+                || !bytes[i + 1].is_ascii_hexdigit()
+                || !bytes[i + 2].is_ascii_hexdigit())
+        {
+            pgrx::error!("PT0577: invalid prefix expansion IRI");
+        }
+        i += 1;
+    }
+}
+
+fn validate_prefix_label(prefix: &str) {
+    let mut chars = prefix.chars();
+    let valid = match chars.next() {
+        Some(c) if c.is_ascii_alphabetic() => {
+            !prefix.ends_with('.')
+                && chars.all(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | '-' | '.'))
+        }
+        _ => false,
+    };
+    if !valid {
+        pgrx::error!("PT0577: invalid prefix label");
+    }
+}
+
+fn ensure_prefix_mutation_authorized() {
+    let allowed = Spi::get_one::<bool>(
+        "SELECT r.rolsuper OR current_user = r.rolname OR \
+         EXISTS (SELECT 1 FROM pg_roles admin WHERE admin.rolname = 'pg_ripple_admin' AND pg_has_role(current_user, admin.oid, 'member')) \
+         FROM pg_database d JOIN pg_roles r ON r.oid = d.datdba WHERE d.datname = current_database()",
+    )
+    .unwrap_or_else(|e| pgrx::error!("prefix authorization SPI error: {e}"))
+    .unwrap_or(false);
+    if !allowed {
+        pgrx::error!("PT0578: prefix mutation is not authorized");
+    }
 }
 
 // ─── Statement Identifier API (v0.4.0) ────────────────────────────────────────
@@ -746,6 +858,7 @@ pub(crate) fn delete_triple_by_ids(s_id: i64, p_id: i64, o_id: i64, g_id: i64) -
             deleted += d;
         } else {
             // Add tombstone to suppress from main.
+            crate::error::fault_injection::hit("tombstone_application");
             Spi::run_with_args(
                 &format!(
                     "INSERT INTO {tombs} (s, o, g) VALUES ($1, $2, $3) \

@@ -1,9 +1,9 @@
 # SPARQL Compliance Matrix
 
-pg_ripple implements the full SPARQL 1.1 specification suite. This page details conformance status for every feature in the W3C SPARQL 1.1 Query, Update, and Protocol recommendations.
+pg_ripple implements a broad SPARQL 1.1 surface. This page records implemented features; the required test evidence covers a locked subset of the upstream standards corpus.
 
-```admonish success title="Full compliance"
-As of v0.46.0, pg_ripple passes 100% of the W3C SPARQL 1.1 test suite (~3 000 tests), ≥ 99.9% of the Apache Jena edge-case suite (~1 000 tests), all 100 WatDiv query templates at 10 M-triple scale with correctness validated to ±0.1% row-count baselines, all 14 LUBM queries with OWL RL inference correctness, and ≥ 80% of the W3C OWL 2 RL conformance suite.
+```admonish success title="Required SPARQL evidence"
+As of v0.136.0, pg_ripple passes all 324 cases in its locked W3C SPARQL 1.1 suite. This is a required, fail-closed CI gate. It is not a claim that every upstream W3C case or every combination of advertised features has been qualified.
 ```
 
 ---

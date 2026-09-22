@@ -7,8 +7,11 @@ use axum::extract::{Query, State};
 use axum::http::{HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
 
-use crate::common::{AppState, check_auth, json_error, redacted_error};
-use crate::spi_bridge::{execute_sparql_with_traceparent, execute_sparql_with_traceparent_routed};
+use crate::common::{AppState, check_auth, check_auth_write, json_error, redacted_error};
+use crate::spi_bridge::{
+    execute_sparql_with_bindings, execute_sparql_with_traceparent,
+    execute_sparql_with_traceparent_routed,
+};
 // Re-use types and constants declared in parent routing module.
 use super::{
     CT_CSV, CT_FORM, CT_JSONLD, CT_NTRIPLES, CT_SPARQL_JSON, CT_SPARQL_QUERY, CT_SPARQL_UPDATE,
@@ -16,6 +19,96 @@ use super::{
 };
 // Helper functions live in admin_handlers (extracted sibling module).
 use super::admin_handlers::{csv_escape, strip_angle, xml_escape};
+
+#[derive(serde::Deserialize)]
+pub(crate) struct SparqlBindingsRequest {
+    pub(crate) query: String,
+    pub(crate) bindings: serde_json::Value,
+    #[serde(default)]
+    pub(crate) prefix_mode: Option<String>,
+    #[serde(default)]
+    pub(crate) replica: Option<String>,
+    #[serde(default)]
+    pub(crate) timeout_ms: Option<u64>,
+}
+
+/// POST /sparql/bindings — typed initial bindings for the public SQL overload.
+pub(crate) async fn sparql_bindings_post(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    body: Body,
+) -> Response {
+    if let Err(r) = check_auth(&state, &headers) {
+        return r;
+    }
+
+    let body_bytes = match axum::body::to_bytes(body, 10 * 1024 * 1024).await {
+        Ok(bytes) => bytes,
+        Err(_) => {
+            return json_error(
+                "PT413",
+                "request body too large",
+                StatusCode::PAYLOAD_TOO_LARGE,
+            );
+        }
+    };
+    let request: SparqlBindingsRequest = match serde_json::from_slice(&body_bytes) {
+        Ok(request) => request,
+        Err(error) => {
+            return json_error(
+                "PT400",
+                format!("invalid bindings request: {error}"),
+                StatusCode::BAD_REQUEST,
+            );
+        }
+    };
+    if !request.bindings.is_object() {
+        return json_error(
+            "PT0570",
+            "bindings must be a JSON object",
+            StatusCode::BAD_REQUEST,
+        );
+    }
+    if let Some(mode) = request.prefix_mode.as_deref()
+        && !matches!(mode, "strict" | "registered")
+    {
+        return json_error(
+            "PT400",
+            "prefix_mode must be 'strict' or 'registered'",
+            StatusCode::BAD_REQUEST,
+        );
+    }
+
+    let accept = negotiate_accept(&headers, &request.query);
+    let traceparent = headers
+        .get("traceparent")
+        .and_then(|value| value.to_str().ok())
+        .map(str::to_owned);
+    if crate::stream::is_streamable(&request.query, &accept) {
+        return crate::stream::stream_sparql_with_bindings(
+            &state,
+            &request.query,
+            &request.bindings,
+            &accept,
+            traceparent.as_deref(),
+            request.replica.as_deref() == Some("ok"),
+            request.timeout_ms,
+            request.prefix_mode.as_deref(),
+        )
+        .await;
+    }
+    execute_sparql_with_bindings(
+        &state,
+        &request.query,
+        &request.bindings,
+        &accept,
+        traceparent.as_deref(),
+        request.replica.as_deref() == Some("ok"),
+        request.timeout_ms,
+        request.prefix_mode.as_deref(),
+    )
+    .await
+}
 
 // ─── SPARQL GET handler ──────────────────────────────────────────────────────
 
@@ -55,6 +148,7 @@ pub(crate) async fn sparql_get(
         &accept,
         traceparent.as_deref(),
         use_replica,
+        params.timeout_ms,
     )
     .await
 }
@@ -67,7 +161,7 @@ pub(crate) async fn sparql_post(
     Query(params): Query<SparqlParams>,
     body: Body,
 ) -> Response {
-    if let Err(r) = check_auth(&state, &headers) {
+    if let Err(r) = check_auth_write(&state, &headers) {
         return r;
     }
 
@@ -109,6 +203,7 @@ pub(crate) async fn sparql_post(
             &accept,
             traceparent.as_deref(),
             use_replica,
+            params.timeout_ms,
         )
         .await;
     }
@@ -149,6 +244,7 @@ pub(crate) async fn sparql_post(
                 &accept,
                 traceparent.as_deref(),
                 effective_use_replica,
+                form_params.timeout_ms,
             )
             .await;
         }
@@ -167,29 +263,17 @@ pub(crate) async fn sparql_post(
     )
 }
 
-// ─── SPARQL /stream handler (v0.51.0) ────────────────────────────────────────
+// ─── SPARQL /stream compatibility alias (v0.51.0, direct streaming v0.134.0) ─
 //
-// POST /sparql/stream — streams results as chunked transfer-encoded lines.
-//
-// • SELECT / ASK → JSON-Lines (one JSON binding object per line),
-//   Content-Type: application/sparql-results+json
-// • CONSTRUCT / DESCRIBE → N-Triples (one triple per line),
-//   Content-Type: application/n-triples
-//
-// This endpoint never buffers the full result set in memory: it fetches rows
-// incrementally from PostgreSQL and flushes each row to the client as soon as it
-// arrives.  Clients that support chunked transfer encoding (curl, browsers, most
-// HTTP clients) will receive results progressively.
+// POST /sparql/stream uses the same direct RowStream pipeline as streaming-safe
+// responses from /sparql. The server, not this handler, chooses transfer framing.
 
 pub(crate) async fn sparql_stream_post(
     State(state): State<Arc<AppState>>,
     headers: HeaderMap,
+    Query(params): Query<SparqlParams>,
     body: Body,
 ) -> Response {
-    use axum::body::Body as AxumBody;
-    use tokio_stream::StreamExt as _;
-    use tokio_stream::wrappers::ReceiverStream;
-
     if let Err(r) = check_auth(&state, &headers) {
         return r;
     }
@@ -197,94 +281,68 @@ pub(crate) async fn sparql_stream_post(
     let body_bytes = match axum::body::to_bytes(body, 10 * 1024 * 1024).await {
         Ok(b) => b,
         Err(_) => {
-            return (StatusCode::PAYLOAD_TOO_LARGE, "request body too large").into_response();
-        }
-    };
-    let query_text = String::from_utf8_lossy(&body_bytes).to_string();
-
-    let query_lower = query_text.trim().to_lowercase();
-    let is_construct = query_lower.starts_with("construct") || query_lower.starts_with("describe");
-
-    let content_type = if is_construct {
-        CT_NTRIPLES
-    } else {
-        CT_SPARQL_JSON
-    };
-
-    let client = match state.pool.get().await {
-        Ok(c) => c,
-        Err(e) => {
-            return redacted_error(
-                "service_unavailable",
-                &format!("pool error: {e}"),
-                StatusCode::SERVICE_UNAVAILABLE,
+            return json_error(
+                "PT413",
+                "request body too large",
+                StatusCode::PAYLOAD_TOO_LARGE,
             );
         }
     };
-
-    // Use a channel so we can stream rows as they arrive from PostgreSQL.
-    let (tx, rx) = tokio::sync::mpsc::channel::<Result<Vec<u8>, std::convert::Infallible>>(64);
-
-    tokio::spawn(async move {
-        if is_construct {
-            // CONSTRUCT / DESCRIBE: stream as N-Triples (one "<s> <p> <o> .\n" per row).
-            let rows = client
-                .query(
-                    "SELECT s, p, o FROM pg_ripple.sparql_construct($1)",
-                    &[&query_text],
-                )
-                .await;
-            match rows {
-                Ok(rows) => {
-                    for row in rows {
-                        let s: String = row.get(0);
-                        let p: String = row.get(1);
-                        let o: String = row.get(2);
-                        let line = format!("{s} {p} {o} .\n");
-                        if tx.send(Ok(line.into_bytes())).await.is_err() {
-                            break;
-                        }
-                    }
-                }
-                Err(e) => {
-                    let msg = format!("# error: {e}\n");
-                    let _ = tx.send(Ok(msg.into_bytes())).await;
-                }
+    let body_text = String::from_utf8_lossy(&body_bytes).to_string();
+    let content_type = headers
+        .get("content-type")
+        .and_then(|value| value.to_str().ok())
+        .unwrap_or("")
+        .to_ascii_lowercase();
+    let (query_text, use_replica, timeout_ms) = if content_type.starts_with(CT_FORM) {
+        let form_params: SparqlParams = match serde_urlencoded::from_str(&body_text) {
+            Ok(params) => params,
+            Err(_) => {
+                return json_error(
+                    "PT400",
+                    "invalid application/x-www-form-urlencoded body",
+                    StatusCode::BAD_REQUEST,
+                );
             }
-        } else {
-            // SELECT / ASK: stream as JSON-Lines (one binding JSON object per line).
-            let sql = if query_lower.starts_with("ask") {
-                "SELECT json_build_object('boolean', pg_ripple.sparql_ask($1))::text"
-            } else {
-                "SELECT row_to_json(t)::text FROM (SELECT result FROM pg_ripple.sparql($1)) t"
-            };
-            let rows = client.query(sql, &[&query_text]).await;
-            match rows {
-                Ok(rows) => {
-                    for row in rows {
-                        let line_str: String = row.get(0);
-                        let line = format!("{line_str}\n");
-                        if tx.send(Ok(line.into_bytes())).await.is_err() {
-                            break;
-                        }
-                    }
-                }
-                Err(e) => {
-                    let msg = format!("{{\"error\":\"{}\"}}\n", e.to_string().replace('"', "'"));
-                    let _ = tx.send(Ok(msg.into_bytes())).await;
-                }
-            }
-        }
-    });
-
-    let stream = ReceiverStream::new(rx).map(|chunk| chunk.map(axum::body::Bytes::from));
-
-    Response::builder()
-        .status(StatusCode::OK)
-        .header("content-type", content_type)
-        .header("transfer-encoding", "chunked")
-        .body(AxumBody::from_stream(stream))
-        .unwrap_or_else(|_| StatusCode::INTERNAL_SERVER_ERROR.into_response())
+        };
+        let Some(query) = form_params.query else {
+            return json_error(
+                "PT400",
+                "streaming requires a 'query' parameter",
+                StatusCode::BAD_REQUEST,
+            );
+        };
+        (
+            query,
+            params.replica.as_deref() == Some("ok") || form_params.replica.as_deref() == Some("ok"),
+            form_params.timeout_ms,
+        )
+    } else if content_type.starts_with(CT_SPARQL_QUERY) || content_type.is_empty() {
+        (
+            body_text,
+            params.replica.as_deref() == Some("ok"),
+            params.timeout_ms,
+        )
+    } else {
+        return json_error(
+            "PT415",
+            "expected application/sparql-query or application/x-www-form-urlencoded",
+            StatusCode::UNSUPPORTED_MEDIA_TYPE,
+        );
+    };
+    let accept = negotiate_stream_accept(&headers, &query_text);
+    let traceparent = headers
+        .get("traceparent")
+        .and_then(|value| value.to_str().ok());
+    crate::stream::stream_sparql(
+        &state,
+        &query_text,
+        &accept,
+        traceparent,
+        use_replica,
+        timeout_ms,
+    )
+    .await
 }
 
 // ─── Content negotiation ─────────────────────────────────────────────────────
@@ -304,8 +362,8 @@ pub(crate) fn negotiate_accept(headers: &HeaderMap, query: &str) -> String {
         .and_then(|v| v.to_str().ok())
         .unwrap_or("");
 
-    let query_lower = query.trim().to_lowercase();
-    let is_construct = query_lower.starts_with("construct") || query_lower.starts_with("describe");
+    let is_construct =
+        crate::stream::is_construct_query(query) || crate::stream::is_describe_query(query);
 
     // Explicit accept header takes precedence.
     for candidate in accept
@@ -325,6 +383,30 @@ pub(crate) fn negotiate_accept(headers: &HeaderMap, query: &str) -> String {
     } else {
         CT_SPARQL_JSON.to_owned()
     }
+}
+
+pub(crate) fn negotiate_stream_accept(headers: &HeaderMap, query: &str) -> String {
+    let accept = headers
+        .get("accept")
+        .and_then(|value| value.to_str().ok())
+        .unwrap_or("");
+    for candidate in accept
+        .split(',')
+        .map(|value| value.split(';').next().unwrap_or("").trim())
+    {
+        if matches!(candidate, CT_SPARQL_JSON | CT_CSV | CT_TSV | CT_NTRIPLES) {
+            return candidate.to_owned();
+        }
+    }
+    if query_form_is_graph(query) {
+        CT_NTRIPLES.to_owned()
+    } else {
+        CT_SPARQL_JSON.to_owned()
+    }
+}
+
+fn query_form_is_graph(query: &str) -> bool {
+    crate::stream::is_graph_query(query)
 }
 
 // ─── Result formatters ───────────────────────────────────────────────────────

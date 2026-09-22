@@ -62,6 +62,20 @@ mod tests {
     }
 
     #[pg_test]
+    fn test_ntriples_bulk_load_updates_dictionary_stats() {
+        let data = (0..4_000)
+            .map(|i| {
+                format!(
+                    "<https://example.org/bulk-s{i}> <https://example.org/bulk-p> \
+                     <https://example.org/bulk-o{i}> ."
+                )
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert_eq!(crate::bulk_load::load_ntriples(&data, true), 4_000);
+    }
+
+    #[pg_test]
     fn test_turtle_bulk_load() {
         let data = "@prefix ex: <https://example.org/> .\nex:x ex:rel ex:y .\n";
         let count = crate::bulk_load::load_turtle(data, false);

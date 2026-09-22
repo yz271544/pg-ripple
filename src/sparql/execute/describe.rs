@@ -25,6 +25,23 @@ use crate::storage;
 /// `scbd`, `symmetric`) overrides `pg_ripple.describe_strategy` when set.
 /// `symmetric` is treated as an alias for `scbd`.
 pub(crate) fn sparql_describe(query_text: &str, strategy: &str) -> Vec<pgrx::JsonB> {
+    sparql_describe_impl(query_text, strategy, None)
+}
+
+pub(crate) fn sparql_describe_with_bindings(
+    query_text: &str,
+    bindings: &serde_json::Value,
+    strategy: &str,
+) -> Vec<pgrx::JsonB> {
+    sparql_describe_impl(query_text, strategy, Some(bindings))
+}
+
+fn sparql_describe_impl(
+    query_text: &str,
+    strategy: &str,
+    bindings: Option<&serde_json::Value>,
+) -> Vec<pgrx::JsonB> {
+    let query_text = super::super::parse::preprocess_query(query_text);
     // SC13-04 (v0.86.0): resolve effective strategy from describe_form GUC or fallback.
     let describe_form_raw = crate::gucs::sparql::DESCRIBE_FORM.get();
     let effective_strategy: String = if let Some(form) = describe_form_raw {
@@ -39,7 +56,7 @@ pub(crate) fn sparql_describe(query_text: &str, strategy: &str) -> Vec<pgrx::Jso
     let strategy = effective_strategy.as_str();
 
     let query = SparqlParser::new()
-        .parse_query(query_text)
+        .parse_query(&query_text)
         .unwrap_or_else(|e| pgrx::error!("SPARQL parse error: {}", e));
 
     // In spargebra 0.4, DESCRIBE resources are encoded as projected SELECT
@@ -49,15 +66,31 @@ pub(crate) fn sparql_describe(query_text: &str, strategy: &str) -> Vec<pgrx::Jso
         spargebra::Query::Describe { pattern, .. } => pattern,
         _ => pgrx::error!("sparql_describe() requires a DESCRIBE query"),
     };
+    let pattern = if let Some(bindings) = bindings {
+        super::super::bindings::with_bindings(pattern, bindings)
+            .unwrap_or_else(|e| pgrx::error!("invalid SPARQL bindings: {e}"))
+    } else {
+        pattern
+    };
 
-    let trans = sqlgen::translate_select(&pattern, None);
+    let trans = if bindings.is_some() {
+        sqlgen::translate_select_parameterized(&pattern, None)
+    } else {
+        sqlgen::translate_select(&pattern, None)
+    };
     let (sql, variables) = (trans.sql, trans.variables);
+    let params = trans.parameters;
 
     // Collect all result IDs from the projected variables.
     let mut resource_ids: Vec<i64> = Vec::new();
     Spi::connect(|client| {
+        let args: Vec<pgrx::datum::DatumWithOid> = params
+            .iter()
+            .copied()
+            .map(pgrx::datum::DatumWithOid::from)
+            .collect();
         let rows = client
-            .select(&sql, None, &[])
+            .select(&sql, None, &args)
             .unwrap_or_else(|e| pgrx::error!("DESCRIBE SELECT SPI error: {e}"));
         for row in rows {
             for i in 1..=(variables.len() as i64) {
@@ -95,7 +128,7 @@ pub(crate) fn sparql_describe(query_text: &str, strategy: &str) -> Vec<pgrx::Jso
 /// Recursion depth is capped by `pg_ripple.describe_max_depth` GUC (default 16).
 /// Raises a `PT_DEPTH_LIMIT` error when exceeded to prevent runaway traversal on
 /// cyclic or very deep graphs.
-fn describe_cbd(subject_id: i64, symmetric: bool) -> Vec<(i64, i64, i64)> {
+pub(crate) fn describe_cbd(subject_id: i64, symmetric: bool) -> Vec<(i64, i64, i64)> {
     let max_depth = crate::gucs::storage::DESCRIBE_MAX_DEPTH.get() as usize;
     let mut triples: Vec<(i64, i64, i64)> = Vec::new();
     let mut visited: std::collections::HashSet<i64> = std::collections::HashSet::new();

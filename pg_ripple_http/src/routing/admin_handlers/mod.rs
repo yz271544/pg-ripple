@@ -13,14 +13,9 @@ use axum::body::Body;
 use axum::extract::State;
 use axum::http::{HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
-use constant_time_eq::constant_time_eq;
 
 use super::sparql_handlers::json_response_http;
-use crate::common::{AppState, redacted_error};
-
-// Re-import routing types for ApiDoc
-use super::ApiDoc;
-use utoipa::OpenApi as _;
+use crate::common::{AppState, check_auth_admin, check_auth_metrics, redacted_error};
 
 /// Build timestamp recorded at compile time (RFC 3339).
 /// BUILD-TIME-FIELD-01 (v0.83.0): populated by build.rs with an RFC-3339
@@ -269,23 +264,8 @@ pub(crate) async fn metrics_endpoint(
     headers: HeaderMap,
 ) -> Response {
     // M16-22 (v0.115.0): optional bearer-token auth for the metrics endpoint.
-    if let Some(expected) = &state.metrics_token {
-        let provided = headers
-            .get("authorization")
-            .and_then(|v| v.to_str().ok())
-            .unwrap_or("");
-        let token = provided.strip_prefix("Bearer ").unwrap_or(provided);
-        if !constant_time_eq(token.as_bytes(), expected.as_bytes()) {
-            // SAFETY: status code and header values are compile-time constants.
-            return axum::response::Response::builder()
-                .status(StatusCode::UNAUTHORIZED)
-                .header("www-authenticate", "Bearer realm=\"pg_ripple\"")
-                .header("content-type", "application/json")
-                .body(axum::body::Body::from(
-                    r#"{"error":"PT401","message":"metrics token required"}"#,
-                ))
-                .expect("infallible: hardcoded valid HTTP headers");
-        }
+    if let Err(response) = check_auth_metrics(&state, &headers) {
+        return response;
     }
     let m = &state.metrics;
     let body = format!(
@@ -357,6 +337,9 @@ pub(crate) async fn metrics_endpoint(
          # HELP pg_ripple_bidi_relay_dropped_total Total bidi relay dispatch calls dropped due to inflight overflow (H15-03)\n\
          # TYPE pg_ripple_bidi_relay_dropped_total counter\n\
          pg_ripple_bidi_relay_dropped_total {}\n\
+         # HELP pg_ripple_json_writeback_drain_errors_total Total drain_json_writeback_queue() status-update failures (L18-02)\n\
+         # TYPE pg_ripple_json_writeback_drain_errors_total counter\n\
+         pg_ripple_json_writeback_drain_errors_total {}\n\
          # HELP pg_ripple_merge_cycle_duration_seconds Cumulative merge cycle wall-clock time in seconds (M15-19)\n\
          # TYPE pg_ripple_merge_cycle_duration_seconds counter\n\
          pg_ripple_merge_cycle_duration_seconds {}\n\
@@ -448,6 +431,7 @@ pub(crate) async fn metrics_endpoint(
         m.pagerank_queue_max_delta(),
         m.pagerank_queue_oldest_enqueue_seconds(),
         m.bidi_relay_dropped_total(),
+        m.json_writeback_drain_errors_total(),
         m.merge_cycle_duration_secs(),
         m.datalog_stratum_duration_secs(),
         m.shacl_validation_queue_depth(),
@@ -483,6 +467,55 @@ pub(crate) async fn metrics_endpoint(
         m.rule_library_subscribe_errors_total(),
         // FEAT-02 (v0.125.0): graph snapshot gauge.
         m.graph_snapshots_total(),
+    );
+
+    let stream_metrics = format!(
+        "# HELP pg_ripple_http_stream_requests_total Total HTTP streaming responses\n\
+         # TYPE pg_ripple_http_stream_requests_total counter\n\
+         pg_ripple_http_stream_requests_total{{form=\"all\",format=\"all\",status=\"all\"}} {}\n\
+         # HELP pg_ripple_http_stream_active Active HTTP streams\n\
+         # TYPE pg_ripple_http_stream_active gauge\n\
+         pg_ripple_http_stream_active{{form=\"all\",format=\"all\",status=\"all\"}} {}\n\
+         # HELP pg_ripple_http_stream_rows_total Rows emitted by HTTP streams\n\
+         # TYPE pg_ripple_http_stream_rows_total counter\n\
+         pg_ripple_http_stream_rows_total{{form=\"all\"}} {}\n\
+         # HELP pg_ripple_http_stream_bytes_total Bytes emitted by HTTP streams\n\
+         # TYPE pg_ripple_http_stream_bytes_total counter\n\
+         pg_ripple_http_stream_bytes_total{{format=\"all\"}} {}\n\
+         # HELP pg_ripple_http_stream_duration_seconds Cumulative HTTP stream duration\n\
+         # TYPE pg_ripple_http_stream_duration_seconds counter\n\
+         pg_ripple_http_stream_duration_seconds{{form=\"all\",format=\"all\",status=\"all\"}} {:.6}\n\
+         # HELP pg_ripple_http_stream_first_byte_seconds Cumulative time to first byte\n\
+         # TYPE pg_ripple_http_stream_first_byte_seconds counter\n\
+         pg_ripple_http_stream_first_byte_seconds{{form=\"all\",format=\"all\",status=\"all\"}} {:.6}\n\
+         # HELP pg_ripple_http_stream_cancellations_total Stream cancellations\n\
+         # TYPE pg_ripple_http_stream_cancellations_total counter\n\
+         pg_ripple_http_stream_cancellations_total{{reason=\"all\"}} {}\n\
+         pg_ripple_http_stream_cancellations_total{{reason=\"disconnect\"}} {}\n\
+         pg_ripple_http_stream_cancellations_total{{reason=\"deadline\"}} {}\n\
+         pg_ripple_http_stream_cancellations_total{{reason=\"shutdown\"}} {}\n\
+         # HELP pg_ripple_http_stream_cancel_failures_total Stream cancellation failures\n\
+         # TYPE pg_ripple_http_stream_cancel_failures_total counter\n\
+         pg_ripple_http_stream_cancel_failures_total {}\n\
+         # HELP pg_ripple_http_stream_errors_total Stream errors\n\
+         # TYPE pg_ripple_http_stream_errors_total counter\n\
+         pg_ripple_http_stream_errors_total {}\n\
+         # HELP pg_ripple_http_stream_connection_discards_total Discarded stream connections\n\
+         # TYPE pg_ripple_http_stream_connection_discards_total counter\n\
+         pg_ripple_http_stream_connection_discards_total {{reason=\"all\"}} {}\n",
+        m.stream_requests_total(),
+        m.active_streams(),
+        m.stream_rows_total(),
+        m.stream_bytes_total(),
+        m.stream_duration_secs(),
+        m.stream_first_byte_duration_secs(),
+        m.stream_cancellations_total(),
+        m.stream_disconnect_cancellations_total(),
+        m.stream_deadline_cancellations_total(),
+        m.stream_shutdown_cancellations_total(),
+        m.stream_cancel_failures_total(),
+        m.stream_errors_total(),
+        m.stream_connection_discards_total(),
     );
 
     // Feature 6 (v0.119.0): Append per-endpoint federation circuit breaker
@@ -525,7 +558,21 @@ pub(crate) async fn metrics_endpoint(
         String::new()
     };
 
-    let full_body = body + &circuit_gauge;
+    let stream_error_metrics = format!(
+        "# HELP pg_ripple_http_stream_db_errors_total Database errors in HTTP streams\n\
+         # TYPE pg_ripple_http_stream_db_errors_total counter\n\
+         pg_ripple_http_stream_db_errors_total{{class=\"all\"}} {}\n\
+         # HELP pg_ripple_http_stream_encoder_errors_total Encoder errors in HTTP streams\n\
+         # TYPE pg_ripple_http_stream_encoder_errors_total counter\n\
+         pg_ripple_http_stream_encoder_errors_total{{format=\"all\"}} {}\n\
+         pg_ripple_http_stream_cancellations_total{{reason=\"idle_timeout\"}} {}\n\
+         pg_ripple_http_stream_cancellations_total{{reason=\"encoder_error\"}} {}\n",
+        m.stream_db_errors_total(),
+        m.stream_encoder_errors_total(),
+        m.stream_idle_cancellations_total(),
+        m.stream_encoder_cancellations_total(),
+    );
+    let full_body = body + &stream_metrics + &stream_error_metrics + &circuit_gauge;
 
     Response::builder()
         .status(StatusCode::OK)
@@ -696,9 +743,7 @@ pub(crate) async fn service_description() -> Response {
     )
 )]
 pub(crate) async fn openapi_spec() -> Response {
-    let yaml = ApiDoc::openapi()
-        .to_yaml()
-        .unwrap_or_else(|e| format!("# openapi generation error: {e}\n"));
+    let yaml = include_str!("../../../openapi.yaml");
 
     Response::builder()
         .status(StatusCode::OK)
@@ -731,8 +776,7 @@ pub(crate) async fn bench_history(
     State(state): State<Arc<AppState>>,
     headers: HeaderMap,
 ) -> Response {
-    use crate::common::check_auth_write;
-    if let Err(r) = check_auth_write(&state, &headers) {
+    if let Err(r) = check_auth_admin(&state, &headers) {
         return r;
     }
     let client = match state.pool.get().await {

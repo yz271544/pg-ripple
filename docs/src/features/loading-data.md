@@ -344,12 +344,12 @@ SELECT pg_ripple.load_rdfxml_file('/data/ontologies/dublin_core.rdf');
 
 ### Throughput by Loading Mode
 
-| Mode | Approximate throughput | Use case |
+| Mode | Relative cost | Use case |
 |---|---|---|
-| `insert_triple()` | 3,000–8,000 triples/s | Real-time ingestion, single-triple updates |
-| `load_turtle()` / `load_ntriples()` | 30,000–80,000 triples/s | Interactive bulk loads up to a few MB |
-| `load_ntriples_file()` | 80,000–200,000 triples/s | Large server-side files |
-| `load_turtle_file()` | 60,000–150,000 triples/s | Large server-side Turtle files |
+| `insert_triple()` | Highest per-triple overhead | Real-time ingestion, single-triple updates |
+| `load_turtle()` / `load_ntriples()` | Batched | Interactive bulk loads up to a few MB |
+| `load_ntriples_file()` | Streaming, usually lowest parser overhead | Large server-side files |
+| `load_turtle_file()` | Streaming with Turtle parsing | Large server-side Turtle files |
 
 ```admonish note
 N-Triples is consistently faster than Turtle because it requires no prefix expansion

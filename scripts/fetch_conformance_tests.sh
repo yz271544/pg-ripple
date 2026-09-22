@@ -1,10 +1,11 @@
 #!/usr/bin/env bash
 # scripts/fetch_conformance_tests.sh
 #
-# Downloads conformance test data for pg_ripple's three test suites:
+# Downloads external test data used by pg_ripple's qualification jobs:
 #   • W3C SPARQL 1.1 test suite  (--w3c, default)
 #   • Apache Jena test suite     (--jena)
 #   • WatDiv query templates     (--watdiv)
+#   • W3C OWL 2 RL source       (--owl2rl)
 #
 # Extends scripts/fetch_w3c_tests.sh to cover Jena and WatDiv.
 #
@@ -13,12 +14,14 @@
 #   bash scripts/fetch_conformance_tests.sh --w3c      # W3C only
 #   bash scripts/fetch_conformance_tests.sh --jena     # Jena only
 #   bash scripts/fetch_conformance_tests.sh --watdiv   # WatDiv only
+#   bash scripts/fetch_conformance_tests.sh --owl2rl   # OWL source only
 #   bash scripts/fetch_conformance_tests.sh --force    # re-download everything
 #
 # Environment variables:
 #   W3C_TEST_DIR      Output directory for W3C tests  (default: tests/w3c/data)
 #   JENA_TEST_DIR     Output directory for Jena tests (default: tests/jena/data)
-#   WATDIV_DATA_DIR   Output directory for WatDiv RDF data (default: tests/watdiv/data)
+#   OWL2RL_TEST_DIR   Output directory for OWL source (default: tests/owl2rl/data)
+#   WATDIV_DATA_DIR   Output directory for generated WatDiv data (default: tests/watdiv/data)
 #   WATDIV_TMPL_DIR   Output directory for WatDiv templates (default: tests/watdiv/templates)
 #
 # Downloads are verified against SHA-256 checksums.
@@ -32,6 +35,13 @@ RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; NC='\033[0m'
 info()  { echo -e "${YELLOW}[info]${NC}  $*"; }
 ok()    { echo -e "${GREEN}[  ok]${NC}  $*"; }
 fail()  { echo -e "${RED}[FAIL]${NC}  $*" >&2; exit 1; }
+
+validate_source() {
+    local suite="$1"
+    shift
+    python3 "${SCRIPT_DIR}/validate_conformance_sources.py" \
+        --suite "$suite" "$@"
+}
 
 # ── Argument parsing ──────────────────────────────────────────────────────────
 
@@ -74,18 +84,16 @@ fetch_w3c() {
 
 JENA_TEST_DIR="${JENA_TEST_DIR:-${PROJECT_ROOT}/tests/jena/data}"
 
-# Apache Jena test suite is hosted on the Apache GitHub mirror.
-# The SPARQL test resources are under jena-arq/testing/ARQ (not src/test/resources).
-JENA_URL="https://github.com/apache/jena/archive/refs/heads/main.tar.gz"
-JENA_SPARQL_PATH="jena-main/jena-arq/testing/ARQ"
+# Pin the fixture snapshot consumed by the harness.
+JENA_URL="https://raw.githubusercontent.com/apache/jena/790b3dc08fccb6be1ea2868b97bfcbae8f113062/jena-arq/testing/ARQ/testing-2026-05.zip"
 
 # SHA-256 checksum of the Jena archive.
-# NOTE: This changes with each Jena HEAD commit; set JENA_SKIP_CHECKSUM=1 to skip.
-JENA_SHA256="${JENA_SHA256:-}"
+# Set JENA_SKIP_CHECKSUM=1 to skip verification when testing a new snapshot.
+JENA_SHA256="cfe989a8429ca57e6a737ccc094c761ec57737ef06ed7a749257a3ad7d0f7f3e"
 
 fetch_jena() {
     if [[ -d "${JENA_TEST_DIR}" && "${FORCE}" != "--force" ]]; then
-        if find "${JENA_TEST_DIR}" -name "manifest.ttl" 2>/dev/null | grep -q .; then
+        if validate_source jena --directory "${JENA_TEST_DIR}"; then
             ok "Jena test data already present at ${JENA_TEST_DIR}"
             ok "Use --force to re-download."
             return 0
@@ -94,10 +102,11 @@ fetch_jena() {
 
     info "Downloading Apache Jena test suite from GitHub..."
     info "URL: ${JENA_URL}"
-    info "This will extract the SPARQL test resources (~50 MB)."
+    info "This will extract the SPARQL test resources (~4 MB)."
 
-    local archive="/tmp/jena-tests-$$.tar.gz"
-    trap "rm -f '${archive}'" EXIT
+    local archive="/tmp/jena-tests-$$.zip"
+    local extract_dir="/tmp/jena-tests-extract-$$"
+    trap "rm -rf '${extract_dir}' '${archive}'" EXIT
 
     if command -v curl >/dev/null 2>&1; then
         curl -fsSL --retry 3 --retry-delay 5 "${JENA_URL}" -o "${archive}" \
@@ -109,33 +118,17 @@ fetch_jena() {
         fail "Neither curl nor wget is available. Please install one."
     fi
 
-    # Verify checksum if provided.
-    if [[ -n "${JENA_SHA256}" ]]; then
-        info "Verifying SHA-256 checksum..."
-        local actual
-        if command -v sha256sum >/dev/null 2>&1; then
-            actual=$(sha256sum "${archive}" | awk '{print $1}')
-        elif command -v shasum >/dev/null 2>&1; then
-            actual=$(shasum -a 256 "${archive}" | awk '{print $1}')
-        else
-            info "WARNING: no sha256sum or shasum found; skipping checksum verification."
-            actual="${JENA_SHA256}"
-        fi
-        if [[ "${actual}" != "${JENA_SHA256}" ]]; then
-            fail "SHA-256 mismatch: expected ${JENA_SHA256}, got ${actual}"
-        fi
-        ok "Checksum verified."
-    elif [[ "${JENA_SKIP_CHECKSUM:-}" != "1" ]]; then
-        info "Set JENA_SHA256 or JENA_SKIP_CHECKSUM=1 to skip verification."
+    validate_source jena --archive "${archive}"
+
+    if ! command -v unzip >/dev/null 2>&1; then
+        fail "unzip is not available."
     fi
 
     info "Extracting SPARQL test resources..."
-    mkdir -p "${JENA_TEST_DIR}"
-    tar -xzf "${archive}" \
-        --strip-components=3 \
-        -C "${JENA_TEST_DIR}" \
-        "${JENA_SPARQL_PATH}" \
-        2>/dev/null || true   # Some paths may not exist in all Jena versions.
+    mkdir -p "${JENA_TEST_DIR}" "${extract_dir}"
+    unzip -q "${archive}" -d "${extract_dir}"
+    mkdir -p "${JENA_TEST_DIR}/ARQ"
+    cp -R "${extract_dir}/testing/ARQ/." "${JENA_TEST_DIR}/ARQ/"
 
     # Create sub-suite directories expected by the test harness.
     for suite in sparql-query sparql-update sparql-syntax algebra; do
@@ -144,18 +137,13 @@ fetch_jena() {
             # Try alternative layout (Jena uses various directory structures).
             local alt="${JENA_TEST_DIR}/SPARQL/${suite}"
             if [[ -d "${alt}" ]]; then
-                ln -sfn "${alt}" "${src_dir}" 2>/dev/null || true
+                ln -sfn "${alt}" "${src_dir}"
             fi
         fi
     done
 
-    if find "${JENA_TEST_DIR}" -name "manifest.ttl" 2>/dev/null | grep -q .; then
-        ok "Jena test data extracted to ${JENA_TEST_DIR}"
-    else
-        info "WARNING: No manifest.ttl files found after extraction."
-        info "Jena may have changed its repository layout."
-        info "Set JENA_TEST_DIR to a directory containing SPARQL test manifests."
-    fi
+    validate_source jena --directory "${JENA_TEST_DIR}"
+    ok "Jena test data extracted to ${JENA_TEST_DIR}"
 }
 
 # ── WatDiv ────────────────────────────────────────────────────────────────────
@@ -164,19 +152,19 @@ WATDIV_DATA_DIR="${WATDIV_DATA_DIR:-${PROJECT_ROOT}/tests/watdiv/data}"
 WATDIV_TMPL_DIR="${WATDIV_TMPL_DIR:-${PROJECT_ROOT}/tests/watdiv/templates}"
 
 # WatDiv query templates are in a GitHub repository.
-WATDIV_TMPL_URL="https://github.com/daveritchie/watdiv/archive/refs/heads/master.tar.gz"
+WATDIV_TMPL_URL="https://api.github.com/repos/dsg-uwaterloo/watdiv/tarball/482524d0e35423ae1ab7ad1bcfda5bd3c8f76308"
 
 # SHA-256 of the WatDiv template archive.
-WATDIV_TMPL_SHA256="${WATDIV_TMPL_SHA256:-}"
+WATDIV_TMPL_SHA256="ce1707e2ceec57ae8f2d18e0d1e0b8905db31a2c11c6e2768b1eb16ec023f031"
 
 # WatDiv data generation: requires the watdiv binary or Docker image.
 # If WATDIV_BINARY is set, use it; otherwise try Docker.
 WATDIV_BINARY="${WATDIV_BINARY:-}"
-WATDIV_SCALE="${WATDIV_SCALE:-10000000}"   # 10M triples (default for CI)
+WATDIV_SCALE="${WATDIV_SCALE:-10000000}"   # 10M triples when generation is requested
 
 fetch_watdiv_templates() {
     if [[ -d "${WATDIV_TMPL_DIR}" && "${FORCE}" != "--force" ]]; then
-        if find "${WATDIV_TMPL_DIR}" -name "*.sparql" -o -name "*.rq" 2>/dev/null | grep -q .; then
+        if validate_source watdiv --directory "${WATDIV_TMPL_DIR}"; then
             ok "WatDiv templates already present at ${WATDIV_TMPL_DIR}"
             ok "Use --force to re-download."
             return 0
@@ -199,29 +187,21 @@ fetch_watdiv_templates() {
         fail "Neither curl nor wget is available."
     fi
 
-    if [[ -n "${WATDIV_TMPL_SHA256}" ]]; then
-        info "Verifying SHA-256 checksum..."
-        local actual
-        if command -v sha256sum >/dev/null 2>&1; then
-            actual=$(sha256sum "${archive}" | awk '{print $1}')
-        elif command -v shasum >/dev/null 2>&1; then
-            actual=$(shasum -a 256 "${archive}" | awk '{print $1}')
-        else
-            actual="${WATDIV_TMPL_SHA256}"
-        fi
-        if [[ "${actual}" != "${WATDIV_TMPL_SHA256}" ]]; then
-            fail "SHA-256 mismatch: expected ${WATDIV_TMPL_SHA256}, got ${actual}"
-        fi
-        ok "Checksum verified."
-    fi
+    validate_source watdiv --archive "${archive}"
 
     info "Extracting WatDiv templates..."
-    mkdir -p "${WATDIV_TMPL_DIR}"
-    tar -xzf "${archive}" \
-        --strip-components=2 \
-        -C "${WATDIV_TMPL_DIR}" \
-        "watdiv-master/watdiv/data-model/queries" \
-        2>/dev/null || true
+    local extract_dir="/tmp/watdiv-tmpl-extract-$$"
+    mkdir -p "${WATDIV_TMPL_DIR}" "${extract_dir}"
+    tar -xzf "${archive}" -C "${extract_dir}" 2>/dev/null \
+        || fail "Could not extract the WatDiv archive"
+    local query_dir
+    query_dir=$(find "${extract_dir}" -type d -path '*/data-model/queries' -print -quit)
+    if [[ -z "${query_dir}" ]]; then
+        fail "Could not locate WatDiv query templates in the extracted archive"
+    fi
+    find "${query_dir}" -type f \( -name '*.sparql' -o -name '*.rq' \) \
+        -exec cp {} "${WATDIV_TMPL_DIR}/" \;
+    rm -rf "${extract_dir}"
 
     # Organise into sub-directories if not already.
     for class in star chain snowflake complex; do
@@ -232,20 +212,16 @@ fetch_watdiv_templates() {
     for f in "${WATDIV_TMPL_DIR}"/*.sparql "${WATDIV_TMPL_DIR}"/*.rq; do
         base="$(basename "$f")"
         case "${base}" in
-            S*.*)  mv -n "$f" "${WATDIV_TMPL_DIR}/star/"  2>/dev/null || true ;;
-            C*.*)  mv -n "$f" "${WATDIV_TMPL_DIR}/chain/" 2>/dev/null || true ;;
-            F*.*)  mv -n "$f" "${WATDIV_TMPL_DIR}/snowflake/" 2>/dev/null || true ;;
-            B*.*|L*.*)  mv -n "$f" "${WATDIV_TMPL_DIR}/complex/" 2>/dev/null || true ;;
+            S*.*)  mv -n "$f" "${WATDIV_TMPL_DIR}/star/" ;;
+            C*.*)  mv -n "$f" "${WATDIV_TMPL_DIR}/chain/" ;;
+            F*.*)  mv -n "$f" "${WATDIV_TMPL_DIR}/snowflake/" ;;
+            B*.*|L*.*)  mv -n "$f" "${WATDIV_TMPL_DIR}/complex/" ;;
         esac
     done
     shopt -u nullglob
 
-    if find "${WATDIV_TMPL_DIR}" -name "*.sparql" -o -name "*.rq" 2>/dev/null | grep -q .; then
-        ok "WatDiv templates extracted to ${WATDIV_TMPL_DIR}"
-    else
-        info "WARNING: No .sparql/.rq files found after extraction."
-        info "The WatDiv repository layout may have changed."
-    fi
+    validate_source watdiv --directory "${WATDIV_TMPL_DIR}"
+    ok "WatDiv templates extracted to ${WATDIV_TMPL_DIR}"
 }
 
 generate_watdiv_data() {
@@ -293,36 +269,34 @@ fetch_watdiv() {
 OWL2RL_DIR="${OWL2RL_TEST_DIR:-${PROJECT_ROOT}/tests/owl2rl/data}"
 
 fetch_owl2rl() {
-    info "Fetching W3C OWL 2 RL test manifests..."
+    info "Fetching the pinned W3C OWL 2 test corpus..."
 
-    if [[ -d "${OWL2RL_DIR}" && "${FORCE}" != "--force" ]]; then
-        if find "${OWL2RL_DIR}" -name "manifest.ttl" 2>/dev/null | grep -q .; then
+    if [[ -f "${OWL2RL_DIR}/all.rdf" && "${FORCE}" != "--force" ]]; then
+        if validate_source owl2_rl --directory "${OWL2RL_DIR}"; then
             ok "OWL 2 RL test data already present at ${OWL2RL_DIR}"
             return 0
         fi
     fi
 
-    mkdir -p "${OWL2RL_DIR}"
-
-    local OWL2RL_URL="https://github.com/w3c/owl2-profiles-tests/archive/refs/heads/master.tar.gz"
-    local OWL2RL_ARCHIVE="${OWL2RL_DIR}/owl2rl-tests.tar.gz"
+    local archive="/tmp/owl2rl-all-$$.rdf"
+    trap "rm -f '${archive}'" EXIT
+    local url="https://www.w3.org/2009/11/owl-test/all.rdf"
 
     if command -v curl >/dev/null 2>&1; then
-        curl -fsSL "${OWL2RL_URL}" -o "${OWL2RL_ARCHIVE}" \
-            || { info "WARNING: OWL 2 RL download failed — tests will skip gracefully."; return 0; }
+        curl -fsSL --retry 3 --retry-delay 5 "${url}" -o "${archive}" \
+            || fail "OWL 2 RL corpus download failed."
     elif command -v wget >/dev/null 2>&1; then
-        wget -q "${OWL2RL_URL}" -O "${OWL2RL_ARCHIVE}" \
-            || { info "WARNING: OWL 2 RL download failed — tests will skip gracefully."; return 0; }
+        wget -q --tries=3 --wait=5 "${url}" -O "${archive}" \
+            || fail "OWL 2 RL corpus download failed."
     else
-        info "WARNING: Neither curl nor wget available — OWL 2 RL tests will skip."
-        return 0
+        fail "Neither curl nor wget is available."
     fi
 
-    tar -xzf "${OWL2RL_ARCHIVE}" -C "${OWL2RL_DIR}" --strip-components=1 \
-        || { info "WARNING: OWL 2 RL archive extraction failed."; return 0; }
-
-    rm -f "${OWL2RL_ARCHIVE}"
-    ok "OWL 2 RL test data extracted to ${OWL2RL_DIR}"
+    validate_source owl2_rl --archive "${archive}"
+    mkdir -p "${OWL2RL_DIR}"
+    cp "${archive}" "${OWL2RL_DIR}/all.rdf"
+    validate_source owl2_rl --directory "${OWL2RL_DIR}"
+    ok "OWL 2 RL corpus ready at ${OWL2RL_DIR}/all.rdf"
 }
 
 # ── BSBM data (v0.46.0) ───────────────────────────────────────────────────────
@@ -341,27 +315,19 @@ fetch_bsbm() {
 
     mkdir -p "${BSBM_DATA_DIR}"
 
-    # BSBM requires the Java-based data generator.  We check for it and skip
-    # gracefully if it's not available.
     if ! command -v java >/dev/null 2>&1; then
-        info "WARNING: Java not found — BSBM data generation requires Java."
-        info "Install Java and the BSBM tools from http://wbsg.informatik.uni-mannheim.de/bizer/berlinsparqlbenchmark/"
-        info "BSBM regression tests will skip gracefully without data."
-        return 0
+        fail "Java is required to generate the external BSBM dataset."
     fi
 
     # Check for the BSBM generator jar.
     local BSBM_JAR="${BSBM_JAR:-}"
     if [[ -z "${BSBM_JAR}" ]]; then
-        info "WARNING: BSBM_JAR not set — set it to the path of the BSBM generator jar."
-        info "Download from http://wbsg.informatik.uni-mannheim.de/bizer/berlinsparqlbenchmark/"
-        info "BSBM regression tests will skip gracefully without data."
-        return 0
+        fail "BSBM_JAR must point to the BSBM generator jar."
     fi
 
     info "Generating BSBM 1M-triple dataset (scale factor 1000)..."
     java -jar "${BSBM_JAR}" -pc 1000 -dir "${BSBM_DATA_DIR}" \
-        || { info "WARNING: BSBM data generation failed."; return 0; }
+        || fail "BSBM data generation failed."
 
     ok "BSBM 1M-triple dataset generated at ${BSBM_DATA_DIR}"
 }
@@ -375,9 +341,3 @@ fetch_bsbm() {
 [[ "${DO_BSBM}" == "true" ]]   && fetch_bsbm
 
 ok "Conformance test data fetch complete."
-info "Run the test suites with:"
-info "  cargo test --test w3c_suite"
-info "  cargo test --test jena_suite"
-info "  cargo test --test watdiv_suite"
-info "  cargo test --test owl2rl_suite"
-info "  cargo test --test datalog_convergence_suite"

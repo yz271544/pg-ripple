@@ -1,6 +1,6 @@
 # Deployment Models
 
-pg_ripple runs as a PostgreSQL 18 extension. It can be deployed in any environment that supports PostgreSQL 18 with extension loading. This page covers the three primary deployment models and provides production-ready configuration examples.
+pg_ripple runs as a PostgreSQL 18 extension. It can be deployed in any environment that supports PostgreSQL 18 with extension loading. This page covers the three primary deployment models and provides configuration examples for evaluation and bounded pilots.
 
 ---
 

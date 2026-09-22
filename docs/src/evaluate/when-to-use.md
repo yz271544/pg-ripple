@@ -40,7 +40,7 @@ Ask yourself these questions in order:
 
 ## When pg_ripple is not the best fit
 
-- **Graph datasets exceeding ~1 billion triples**: pg_ripple has been tested to 100M triples. For very large datasets, consider distributed solutions.
+- **Large or distributed datasets without a project-specific qualification run**: the repository does not contain a current production-scale result. Benchmark your pinned build or choose a distributed system with evidence for your target scale.
 - **Property graph with Cypher/GQL**: if your team already uses Cypher and Neo4j, migrating to SPARQL has a learning curve. pg_ripple speaks SPARQL, not Cypher.
 - **Pure vector search workload**: if you only need approximate nearest neighbor search without graph traversal, pgvector alone is simpler.
 - **Real-time streaming graphs**: pg_ripple processes data in transactions, not continuous streams. For streaming graph analytics, consider Apache Flink with a graph library.

@@ -3,7 +3,7 @@
 pg_ripple scales vertically within a single PostgreSQL instance and horizontally for read traffic via streaming replication. This page covers how to allocate resources, tune the merge worker, set up read replicas, and understand current limitations.
 
 ```admonish info title="Current scaling model"
-pg_ripple runs entirely within PostgreSQL. It inherits PostgreSQL's single-writer architecture: one primary handles all writes, and read replicas serve read-only SPARQL queries. Horizontal sharding across multiple workers is available via the [Citus integration](citus-integration.md) (v0.58.0+).
+pg_ripple runs entirely within PostgreSQL. It inherits PostgreSQL's single-writer architecture: one primary handles all writes, and read replicas can serve read-only SPARQL queries. Experimental horizontal sharding is available through the [Citus integration](citus-integration.md), but current CI does not run a Citus cluster.
 ```
 
 ---
@@ -232,16 +232,16 @@ default_pool_size = 20
 
 | Dimension | Current Capability | Limitation |
 |---|---|---|
-| Triples per instance | Tested to 1B+ | Bound by disk and memory |
-| Concurrent SPARQL queries | Hundreds (with pooler) | Bound by `max_connections` and CPU |
-| Write throughput | ~50K–200K triples/sec (bulk load) | Single-writer architecture |
-| Read replicas | Unlimited | Standard PG replication |
-| Cross-node sharding | **Supported** (Citus 12+, v0.58.0+) | Subject-hash distribution; see [Citus integration](citus-integration.md) |
+| Triples per instance | No retained current-version scale result | Bound by disk, memory, and workload |
+| Concurrent SPARQL queries | No retained current-version concurrency result | Bound by connections, CPU, memory, and query shape |
+| Write throughput | Bounded 100,000-triple producer available | Single-primary PostgreSQL architecture |
+| Read replicas | PostgreSQL streaming replication | Must be qualified with the target topology |
+| Cross-node sharding | Experimental Citus integration | Current CI verifies only no-Citus degradation paths |
 | Multi-primary writes | **Not supported** | PostgreSQL limitation |
 | Federation | Supported (SERVICE clause) | Remote endpoints add latency |
 
 ```admonish tip title="Horizontal sharding with Citus"
-pg_ripple v0.58.0+ supports distributing VP tables across Citus worker nodes. Triples are hash-sharded by subject ID so star-pattern queries co-locate on a single worker. v0.59.0 adds SPARQL shard-pruning (10–100× speedup for bound-subject queries). See [Citus integration](citus-integration.md) for setup instructions.
+pg_ripple can distribute VP tables by subject ID and can annotate bound-subject queries for shard pruning. Treat this path as experimental until you have run multi-node correctness, recovery, and load tests on the target topology. See [Citus integration](citus-integration.md).
 ```
 
 ---

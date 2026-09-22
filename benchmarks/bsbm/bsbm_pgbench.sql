@@ -6,11 +6,9 @@
 -- Usage (after loading baseline data with bsbm_load.sql):
 --   pgbench -f benchmarks/bsbm/bsbm_pgbench.sql -c 8 -j 4 -T 60 <dbname>
 --
--- Targets (pg_ripple v0.6.0 HTAP):
---   - Bulk insert throughput:  >100,000 triples/sec
---   - Q1 query latency:         <10 ms
---   - Q4 query latency:         <20 ms
---   - No write-read conflicts (transactions must complete without errors)
+-- This script records workload throughput and errors.  It does not enforce a
+-- universal latency target; interpret results with the accompanying hardware,
+-- PostgreSQL configuration, data scale, and exact pg_ripple commit.
 
 \set product_id random(1, 1000)
 \set feature_id random(1, 5)

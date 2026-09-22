@@ -289,15 +289,15 @@ pub static BIDI_RELAY_MAX_INFLIGHT: pgrx::GucSetting<i32> = pgrx::GucSetting::<i
 
 /// GUC: when `on`, bulk loaders use UNNEST-array batch INSERT for
 /// dictionary-encoded triple stream insertion instead of per-row VALUES INSERTs.
-/// Delivers 5–10× throughput improvement for large loads by reducing SQL string
-/// allocation overhead and enabling plan caching.  Default: `on`. (H16-05 v0.113.0)
+/// This reduces SQL string allocation overhead and enables plan caching.
+/// Default: `on`. (H16-05 v0.113.0)
 pub static BULK_LOAD_USE_COPY: pgrx::GucSetting<bool> = pgrx::GucSetting::<bool>::new(true);
 
 // ─── v0.95.0 storage GUCs ─────────────────────────────────────────────────────
 
 /// GUC: minimum number of new dictionary terms inserted in a single batch
-/// before `VACUUM ANALYZE _pg_ripple.dictionary` is run automatically.
-/// Set to 0 to disable automatic post-encode VACUUM.
+/// before `ANALYZE _pg_ripple.dictionary` is run automatically.
+/// Set to 0 to disable automatic post-encode analysis.
 /// Default: 10000. (M15-07 v0.95.0)
 pub static DICT_VACUUM_THRESHOLD: pgrx::GucSetting<i32> = pgrx::GucSetting::<i32>::new(10_000);
 

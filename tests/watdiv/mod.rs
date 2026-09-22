@@ -8,14 +8,13 @@
 //! - **Snowflake** (F1–F5): star + chain hybrid — tests mixed strategies
 //! - **Complex** (B1–B12, L1–L5): multi-hop with OPTIONAL and UNION
 //!
-//! Correctness is validated by comparing result row counts against pre-computed
-//! baselines (within ±0.1%).  Performance regressions > 20% trigger a CI warning
-//! (not a failure).
+//! Row counts are compared only when a populated baseline is supplied. Current CI
+//! runs the checked-in templates against an empty database without latency baselines.
 //!
 //! # Usage
 //!
 //! ```sh
-//! # Run with cached 10M-triple dataset:
+//! # Run the checked-in templates:
 //! cargo test --test watdiv_suite
 //!
 //! # Or set custom data location:

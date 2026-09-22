@@ -9,15 +9,377 @@ Versions correspond to the milestones in [ROADMAP.md](ROADMAP.md).
 
 ## [Unreleased]
 
+---
+
+## [0.136.0] — 2026-08-30 — External audit readiness and hardened candidate
+
+v0.136.0 packages the hardened candidate for the frozen v1 query contract.
+
+### What you can do
+
+- Verify the release version, migration path (`sql/pg_ripple--0.135.0--0.136.0.sql`), HTTP metadata, image tags, and
+  stable API manifest (`api/stable-v1.json`) agree on `0.136.0`.
+- Run the audit-readiness preflight before handing the exact candidate commit
+  and build artifacts to an external auditor.
+- Upgrade from v0.135.0 through the new migration without changing the public
+  SQL or HTTP query API.
+
+### What happens behind the scenes
+
+- Fresh installs and upgrades advance the schema ledger to `0.136.0`.
+- `compat_check()` now reports that the frozen query contract requires
+  `pg_ripple_http >= 0.135.0`.
+- The audit brief and findings ledger record the required audit scope and keep
+  the external completion gate explicit.
+
+### Technical details
+
+<details>
+<summary>Implementation details</summary>
+
+- `scripts/check_v0136_audit.sh` checks the release artifacts, prior streaming
+  and binding evidence, retained fuzz targets, and audit ledger.
+- `tests/pg_regress/sql/v0136_audit_readiness.sql` checks version metadata,
+  schema stamping, strict prefix defaults, and binding overload preservation.
+- No new stable API was added (`api/stable-v1.json`). The external audit report and remediation
+  attestation must be attached before the v0.136.0 tag is created.
+
+</details>
+
+## [0.135.0] — 2026-08-30 — Safe application query API
+
+### Added
+
+- Added typed one-row URI and literal bindings (`tests/pg_regress/sql/v0135_bindings.sql`)
+  for SELECT, ASK, CONSTRUCT, DESCRIBE, and cursor SQL overloads.
+  Values are algebraic `VALUES` rows and
+  dictionary IDs are passed through typed SPI parameters.
+- Added authenticated `POST /sparql/bindings`, with JSON, CSV, TSV, and
+  N-Triples negotiation, replica routing, timeout handling, and prefix mode.
+- Added governed prefix ownership metadata (`tests/pg_regress/sql/v0135_prefix_mode.sql`),
+  transactional generation state,
+  strict-by-default resolution, the v1 supported-surface profile, and the
+  0.134.0 → 0.135.0 upgrade migration.
+
+## [0.134.0] — 2026-08-29 — Performance, scale, and true streaming qualification
+
+v0.134.0 delivers the performance, scale, and true-streaming query path.
+
+### Added
+
+- Typed internal result metadata and RDF binding rows preserve term kinds,
+  datatypes, language tags, and unbound variables.
+- `/sparql` and `/sparql/stream` use direct PostgreSQL `RowStream` delivery for
+  streaming-safe JSON, CSV, TSV, and N-Triples responses with bounded chunks.
+- Read-only transactions, statement and idle timeouts, backpressure, TLS-aware
+  cancellation, connection cleanup, and stream metrics cover body lifecycles.
+- Cursor row/page counters now increment on real streamed output.
+- Streaming encoder, extension cursor, route, and qualification checks are
+  wired into CI through `scripts/check_v0134_streaming.sh`.
+
+---
+
+## [0.133.0] — 2026-08-28 — Crash recovery, backup, failover, and operations
+
+pg_ripple now has a release-scoped resilience qualification surface for the
+failures expected of PostgreSQL production deployments.
+
+### Added
+
+- Deterministic, test-only fault injection for storage, mutation journal,
+  merge, promotion, writeback, Datalog, and worker boundaries.
+- `pg_ripple.health()` with schema/migration, worker, merge, cache,
+  dead-letter, and replication diagnostics.
+- Crash/restart, logical backup, physical backup, PITR, standby promotion, and
+  resource-pressure qualification harnesses under `tests/resilience/`.
+- Executable recovery runbooks under `docs/src/operations/`.
+
+### Changed
+
+- Merge-worker heartbeat state is persisted in
+  `_pg_ripple.merge_worker_status`, including restart count and last error.
+- The 0.132.0 → 0.133.0 migration creates the durable worker diagnostics table.
+
+## [0.132.0] — 2026-08-28 — Conformance, feature truth, and release evidence
+
+Required conformance gates now fail closed, feature claims are versioned in a
+machine-validated evidence manifest, and HTTP route, documentation, OpenAPI,
+and authorization inventories are checked against the central router.
+
+### What you can do
+
+- Fetch immutable W3C, Jena, and WatDiv corpus snapshots with checksum and
+  shape validation from `tests/conformance/sources.lock`.
+- Inspect release-scoped conformance reports under `results/conformance/<version>/`
+  and feature evidence under
+  `results/features/<version>/` (`results/features/<version>/feature-evidence.json`).
+- Build the complete release evidence bundle with `scripts/build_release_evidence.py`
+  (`target/release-evidence/<version>/`).
+- Use bounded variable-predicate expansion with
+  `pg_ripple.max_predicate_union_branches` and keyset-paginated graph exports.
+
+### Technical details
+
+- Required W3C smoke and LUBM runs reject missing corpora, zero tests, skips,
+  failures, and XPASS results; informational suites remain explicitly marked
+  informational.
+- VP rare, delta, and main partitions have statement-id indexes for keyset
+  pagination; the 0.131.0 → 0.132.0 migration adds the rare-table index.
+- The release bundle (`scripts/build_release_evidence.py`) contains provenance, schema and migration evidence,
+  conformance reports, feature evidence, security checks, test counts, SBOM,
+  and checksums.
+
+## [0.131.0] — 2026-08-27 — Security Hardening and Conformance Evidence
+
+Production HTTP deployments now fail closed by default, temporal RDF output is
+escaped as valid N-Quads terms, and conformance results carry verifiable release
+metadata.
+
+### What you can do
+
+- Run `pg_ripple_http` with an authentication token supplied by an environment
+  variable or secret file; unauthenticated mode is an explicit development opt-in.
+- Safely expose the service behind a configured trusted proxy without allowing
+  untrusted clients to spoof their source address.
+- Use the temporal snapshot and diff endpoints with IRIs, literals, blank nodes,
+  language tags, and typed literals containing special characters.
+- Publish versioned conformance reports under `results/conformance/<version>`.
+
+### What happens behind the scenes
+
+- Missing HTTP credentials return `401 Unauthorized` unless
+  `PG_RIPPLE_HTTP_ALLOW_UNAUTHENTICATED=1` is explicitly set.
+- The LLM key setting rejects raw secret values and accepts only environment
+  variable names, with a superuser-only migration escape hatch.
+- Required conformance data downloads fail CI instead of silently skipping tests;
+  informational failures leave a `conformance-skip.txt` artifact.
+- The 0.130.0 → 0.131.0 migration path is present and has no catalog changes.
+
+### Technical Details
+
+<details>
+<summary>Implementation details</summary>
+
+- `TrustedProxyLayer` rewrites forwarded client addresses only for configured
+  trusted CIDRs and rejects invalid CIDR configuration at startup.
+- Temporal endpoint serialization uses one shared N-Quads term formatter.
+- Conformance JSON reports include `version` and UTC `generated_at` fields;
+  stale checked-in reports are labelled as historical v0.43.0 evidence.
+
+</details>
+
+## [0.130.0] — 2026-08-27 — Installation and Migration Integrity
+
+Fresh installs and upgrades now have an independently checked migration graph,
+schema fingerprint tooling, and a validated JSON writeback configuration API.
+
+### What you can do
+
+- Configure JSON writeback with `pg_ripple.configure_json_writeback()` after
+  validating the target table, key columns, privileges, and conflict policy.
+- Inspect writeback configuration and queue health with
+  `pg_ripple.writeback_inspect()` or `GET /json-mapping/{name}/writeback/config`.
+- Verify an installed database against a normalized schema fingerprint.
+- Run the complete migration-chain and recovery checks (`pg_ripple.feature_status()`)
+  with `just test-migration-full` and `tests/upgrade_recovery.sh`.
+
+### What happens behind the scenes
+
+- The migration graph is parsed from filenames and the control file separately,
+  so missing, duplicate, ambiguous, cyclic, or unreachable paths fail early.
+- The upgrade test discovers the current endpoint dynamically and checks
+  representative data, permissions, and JSON writeback objects.
+- Maintenance, Datalog, and JSON mapping code are split into smaller modules
+  without changing their SQL-facing APIs.
+
+### Technical Details
+
+<details>
+<summary>Implementation details</summary>
+
+- `scripts/migration_graph.py` writes `target/migration-graph.json`.
+- `scripts/schema_fingerprint.sql` and
+  `scripts/compare_schema_fingerprints.py` compare normalized catalog state,
+  functions, policies, extension membership, and pg_ripple GUC defaults.
+- `scripts/check_module_size.sh` reports Rust files over 800 lines and fails
+  files over 1,200 lines.
+- `configure_json_writeback()` caches target-column casts and resets async
+  writeback to disabled when configuration changes.
+
+</details>
+
+---
+
+## [0.129.0] — 2026-08-27 — JSON Writeback and Mutation Integrity
+
+**Repairs async JSON-mapping writeback (introduced in v0.128.0, contained in
+v0.128.1): a wrong dictionary column name meant it never actually worked,
+even though `enable_json_writeback()` could appear to succeed. Direct
+writeback also gets fixed for non-text columns and real affected-row
+counts. See
+[plans/pg-ripple-production-readiness-plan.md](plans/pg-ripple-production-readiness-plan.md#v01290--json-writeback-and-mutation-integrity)
+for the full remediation plan.**
+
 ### Fixed
 
-- **CI: CloudNativePG extension image publishing** — Added `docker-cnpg` job to
-  release workflow to build and publish the extension volume image with the
+- **Async JSON writeback never actually ran** — `enable_json_writeback()`
+  and the background drain worker queried a `_pg_ripple.dictionary.iri`
+  column that has never existed (the real column is `value`); every lookup
+  silently failed, and since v0.128.1's containment fix made
+  `enable_json_writeback()` fail closed on any incomplete coverage, it could
+  never succeed at all. Both now query the real column, so `writeback_enabled
+  = true` finally means the event path works. Predicate lookup failures are
+  now fatal (surfaced to the caller) instead of being swallowed and reported
+  as generic "not yet covered" gaps.
+- **`enable_json_writeback()` required a predicate to already be promoted to
+  its own VP table** — before promotion, all of a predicate's data lives in
+  the shared `vp_rare` table, which had no writeback trigger at all, so a
+  freshly-ingested (still-rare) predicate could never be covered.
+  `enable_json_writeback()` now also installs a predicate-filtered trigger
+  on `vp_rare`, and `promote_predicate()` installs the dedicated-table
+  (and tombstone-table, for main-resident deletes) triggers automatically
+  the moment a covered predicate is promoted, so coverage survives the
+  transition.
+- **Databases upgraded via `ALTER EXTENSION` never got the writeback trigger
+  function** — the v0.128.0 migration script only added the queue table and
+  new columns; the trigger function itself was only created for fresh
+  installs. `enable_json_writeback()` failed with "function does not exist"
+  on any database that upgraded incrementally rather than installing fresh.
+  Backfilled into the v0.127.0 → v0.128.0 migration script.
+- **`writeback_json_row()` / `writeback_json_row_delete()` returned a
+  hard-coded row count** — a conflict-policy `'skip'` that hit an existing
+  row, or a delete that matched nothing, still reported 1 row affected.
+  Both now report the real affected-row count.
+- **Direct writeback failed for any non-text column** — every value was
+  cast to `::text` before insertion, which Postgres rejects for columns
+  like `integer` or `uuid` ("column is of type integer but expression is of
+  type text"). Values are now cast to the target column's real type,
+  derived from `pg_attribute` once per mapping and cached.
+- **A missing `writeback_key_columns` value could build a broken SQL
+  statement** — under the `'error'` conflict policy, filtering out an
+  absent key column while numbering placeholders from the original column
+  list could produce a placeholder with no bound parameter. Missing key
+  values are now validated up front with a descriptive error instead.
+- **`drain_json_writeback_queue()` could silently drop a queue row** — if
+  its own status-update `UPDATE` failed, the row was neither marked
+  processed nor retried. It now logs a warning, increments the new
+  `pg_ripple_json_writeback_drain_errors_total` metric, and leaves the row
+  pending with an incremented `retry_count` instead.
+- **`disable_json_writeback()` could leave triggers permanently installed**
+  — its trigger-discovery query (`information_schema.triggers` via a
+  multi-row SPI call) was found to return zero rows for triggers created
+  moments earlier by another SPI call in the same session, so `DROP
+  TRIGGER` never ran and no error was raised either. A mapping's triggers
+  would then outlive the mapping itself; on a shared table like `vp_rare`
+  this broke every later write to that predicate with a foreign-key
+  violation once the mapping row was deleted. Trigger discovery now queries
+  `pg_catalog.pg_trigger` directly through a single-row aggregate fetch,
+  which does not exhibit the problem.
+
+### Technical Details
+
+- `_pg_ripple.dictionary` lookups in `enable_json_writeback_impl()` and
+  `drain_json_writeback_queue()` now use `WHERE value = $1 AND kind =
+  KIND_IRI` / `SELECT value ... WHERE id = $1 AND kind = KIND_IRI` instead
+  of the nonexistent `iri` column (C18-01).
+  `json_writeback_enqueue_fn()` gained an optional second trigger argument
+  (a predicate id filter, used on the shared `vp_rare` table) and treats an
+  `INSERT` on a `*_tombstones` table as a `delete` event.
+- `writeback_json_row_impl()` / `writeback_json_row_delete_impl()` build
+  their `INSERT ... RETURNING 1` / `DELETE ... RETURNING 1` statements
+  wrapped in a CTE (`WITH ins AS (...) SELECT count(*) FROM ins`) to report
+  the real row count, and cast each value with `CAST($n AS <pg_type>)`
+  using a column-type map cached in the new
+  `_pg_ripple.json_mappings.writeback_column_casts` column.
+- New `_pg_ripple.json_writeback_queue.retry_count SMALLINT` column.
+- `pg_ripple.feature_status()`: `json_mapping_writeback` moves from
+  `broken` back to `implemented`.
+- Six new `tests/pg_regress/sql/v0128_json_writeback.sql` regression cases
+  cover an integer primary key, a UUID key column, a zero-row delete, a
+  missing-key-column error, the `'error'` conflict policy, and
+  `enable_json_writeback()` succeeding for a still-rare predicate.
+- New blog post:
+  [`blog/json-writeback-correctness.md`](blog/json-writeback-correctness.md).
+- `pg_ripple_http`: `COMPATIBLE_EXTENSION_MIN` bumped from `"0.127.0"` to
+  `"0.128.0"`.
+
+## [0.128.1] — 2026-08-26 — Emergency Containment and Safe Patch
+
+**Out-of-band safety patch for v0.128.0. Fixes three critical issues found
+after that release: the HTTP companion could crash on startup instead of serving traffic, the
+production Docker image accepted passwordless remote database connections,
+and async JSON writeback could report itself as enabled without a working
+event path. Nothing new is added — this release only removes unsafe
+behavior; see
+[plans/pg-ripple-production-readiness-plan.md](plans/pg-ripple-production-readiness-plan.md#v01281--emergency-containment-and-safe-patch)
+for the full remediation plan.**
+
+### Security
+
+- **Production Docker image accepted passwordless remote PostgreSQL
+  connections** — `docker/00-pg_hba.sh` unconditionally added `trust` rules
+  for all external TCP connections to every built image, including
+  production pulls; any client that could reach the port got an
+  unauthenticated superuser connection. The script is now inert unless the
+  operator explicitly sets `PG_RIPPLE_DEV_TRUST_AUTH=1` (development only —
+  never set this on a reachable deployment). `docker-compose.yml` now binds
+  PostgreSQL to `127.0.0.1` by default. Added
+  `tests/container/test_pg_hba.sh`, which confirms passwordless TCP auth
+  fails, SCRAM auth with the configured password succeeds, and local
+  Unix-socket access is unaffected.
+
+### Fixed
+
+- **HTTP companion could panic during startup instead of serving traffic** —
+  three routes (`/temporal/graphs/:iri/snapshot`, `/temporal/graphs/:iri/diff`,
+  `/dp/budget/:dataset/:principal`) still used the Axum 0.7 `:capture` path
+  syntax, which Axum 0.8 rejects with a panic at router-construction time —
+  the process would exit before ever binding a port or answering `/health`.
+  All routes now use the `{capture}` syntax Axum 0.8 requires. Added
+  `pg_ripple_http/tests/router_construction.rs`, which builds the full
+  router and dispatches a request to every registered route without a live
+  PostgreSQL connection, and `pg_ripple_http/tests/process_smoke.sh`, which
+  starts the real binary against a real database, polls `/health` and
+  `/ready`, and verifies a clean exit on `SIGTERM`.
+- **`enable_json_writeback()` could report success while leaving predicates
+  uncovered** — it always set `writeback_enabled = true` even when a
+  predicate's dictionary entry or VP delta table did not exist yet, or a
+  trigger failed to install, silently under-covering the async writeback
+  event path (RDF changes for uncovered predicates were never enqueued for
+  relational writeback). It now fails with a descriptive error and leaves
+  `writeback_enabled = false` unless every mapped predicate got a working
+  enqueue trigger. Direct writeback via `writeback_json_row()` and
+  `writeback_json_row_delete()` is unaffected. `pg_ripple.feature_status()`
+  now reports `json_mapping_writeback` as `broken` pending the full
+  trigger-architecture repair in v0.129.0. Added regression coverage in
+  `tests/pg_regress/sql/v0128_json_writeback.sql` (JWB-22).
+- **CI (`release.yml`): CloudNativePG extension image publishing** — Added a
+  `docker-cnpg` job to build and publish the extension volume image with the
   `-cnpg` suffix on each tagged release. The `docker/Dockerfile.cnpg` existed
   but was never built by CI, causing `docker pull
   ghcr.io/trickle-labs/pg-ripple:<version>-cnpg` to fail with "not found". Now
   the extension image is published automatically alongside the main extension
   and HTTP companion images.
+- **CI: `docker/Dockerfile.cnpg` build failure** — The new `docker-cnpg` job
+  (above) failed on its first run: the build stage never copied
+  `.versions.toml` into the build context, so `build.rs` panicked with
+  `cannot read .versions.toml: No such file or directory`. The main
+  `Dockerfile` already copied this file; `Dockerfile.cnpg` now does too.
+- **CI: `tests/container/test_pg_hba.sh` startup race** — The readiness
+  gate polled `pg_isready`, which reports the official postgres entrypoint's
+  *temporary* bootstrap server (used to run `docker/00-pg_hba.sh`) as ready
+  before it restarts into the real server. The SCRAM-auth and local-socket
+  checks could land in that restart gap and fail spuriously. Now gates on an
+  actual authenticated connection succeeding instead.
+
+### Technical Details
+
+- `pg_ripple_http` gained a library target (`src/lib.rs`) re-exporting
+  `routing`, `common`, and `metrics` so integration tests can build the
+  router in-process; `main.rs` is now a thin binary over that library.
+  `routing::build_router()` is `pub` instead of `pub(crate)`.
+- `src/feature_status.rs` documents a new `broken` status value in its
+  taxonomy: "known correctness defect; do not rely on this in production."
 
 ---
 

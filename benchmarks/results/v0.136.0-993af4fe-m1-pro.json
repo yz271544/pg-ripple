@@ -1,0 +1,13 @@
+{
+  "version": "0.136.0",
+  "git_sha": "993af4fef88e",
+  "postgres_version": "18.6 (Homebrew)",
+  "measured_at": "2026-08-31T18:28:01Z",
+  "runner": "macbookpro18,1-apple-m1-pro",
+  "fixture": "synthetic-100k-v1",
+  "insert_throughput_triples_per_sec": 5666,
+  "insert_total_triples": 100000,
+  "insert_elapsed_sec": 17.648,
+  "point_query_latency_ms": 0.819,
+  "sparql_bgp_latency_ms": 0.277
+}

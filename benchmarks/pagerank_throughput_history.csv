@@ -1,4 +1,5 @@
 # pg_ripple PageRank throughput history — Karate Club benchmark (1M edges)
+# Historical, unverified data; not a current v0.136.0 baseline.
 # TEST-06 (v0.92.0): wired to performance_trend.yml as a chart artifact.
 #
 # Columns:

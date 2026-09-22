@@ -6,37 +6,33 @@
 //! Datalog REST API at `/datalog`.
 
 use std::net::SocketAddr;
+use std::path::Path;
 use std::sync::Arc;
 
 use axum::http::HeaderValue;
 use deadpool_postgres::{Config, Runtime};
+use rustls::pki_types::{CertificateDer, PrivateKeyDer, pem::PemObject};
 use tokio_postgres::NoTls;
 use tower_governor::GovernorLayer;
 use tower_governor::governor::GovernorConfigBuilder;
 use tower_http::cors::{AllowOrigin, CorsLayer};
 
-pub mod arrow_encode;
-pub mod common;
-pub mod datalog;
-pub mod metrics;
-pub mod routing;
-pub mod spi_bridge;
-pub mod stream;
-
-use common::{AppState, env_or};
+use pg_ripple_http::common::PgSslMode;
+use pg_ripple_http::common::{AppState, HttpConfig, PgCancelTls, redact_sensitive};
+use pg_ripple_http::routing::middleware::{self, TrustedProxyLayer};
+use pg_ripple_http::{metrics, routing};
 
 // ─── Compatibility constants (COMPAT-01, v0.71.0) ────────────────────────────
 
 /// Minimum pg_ripple extension version that this HTTP companion supports.
-/// Updated each release to match the previous extension version, allowing
-/// a one-version trailing window.
+/// v0.136.0 carries the hardened v0.135.0 query contract.
 ///
 /// HTTP-COMPAT-01 (v0.89.0): bumped to 0.88.0 — requires all v0.84–v0.88 features.
 ///
 /// Connections to older extension versions log a prominent warning. The extension
 /// is still served (degraded mode) so that rolling upgrades do not hard-fail.
 /// Set `PG_RIPPLE_HTTP_STRICT_COMPAT=1` to convert the warning to a fatal startup error.
-const COMPATIBLE_EXTENSION_MIN: &str = "0.127.0";
+const COMPATIBLE_EXTENSION_MIN: &str = "0.135.0";
 
 /// Check that the installed pg_ripple extension version is within the known-compatible
 /// range for this pg_ripple_http build.  Logs a warning if it is not.
@@ -173,6 +169,70 @@ fn parse_semver(s: &str) -> Option<(u32, u32, u32)> {
     Some((major, minor, patch))
 }
 
+fn create_pg_pool(
+    cfg: &Config,
+    http_config: &HttpConfig,
+) -> Result<deadpool_postgres::Pool, String> {
+    match http_config.pg_sslmode {
+        PgSslMode::Disable => cfg
+            .create_pool(Some(Runtime::Tokio1), NoTls)
+            .map_err(|error| error.to_string()),
+        PgSslMode::Require | PgSslMode::VerifyCa | PgSslMode::VerifyFull => {
+            let connector = pg_tls_connector(http_config)?;
+            cfg.create_pool(Some(Runtime::Tokio1), connector)
+                .map_err(|error| error.to_string())
+        }
+    }
+}
+
+fn pg_tls_connector(
+    http_config: &HttpConfig,
+) -> Result<tokio_postgres_rustls::MakeRustlsConnect, String> {
+    let certs = if let Some(path) = &http_config.pg_ca_file {
+        rustls_native_certs::load_certs_from_paths(Some(Path::new(path)), None)
+    } else {
+        rustls_native_certs::load_native_certs()
+    };
+    if let Some(error) = certs.errors.first() {
+        return Err(format!(
+            "could not load PostgreSQL CA certificates: {error}"
+        ));
+    }
+    let mut roots = rustls::RootCertStore::empty();
+    for cert in certs.certs {
+        roots
+            .add(cert)
+            .map_err(|error| format!("could not add PostgreSQL CA certificate: {error}"))?;
+    }
+    if roots.is_empty() {
+        return Err("no PostgreSQL CA certificates were found".to_owned());
+    }
+
+    let builder = rustls::ClientConfig::builder().with_root_certificates(roots);
+    let config = match (
+        &http_config.pg_client_cert_file,
+        &http_config.pg_client_key_file,
+    ) {
+        (Some(cert_path), Some(key_path)) => {
+            let cert_chain = CertificateDer::pem_file_iter(cert_path)
+                .map_err(|error| format!("could not read {cert_path}: {error}"))?
+                .collect::<Result<Vec<_>, _>>()
+                .map_err(|error| {
+                    format!("could not parse PostgreSQL client certificate: {error}")
+                })?;
+            let key = PrivateKeyDer::from_pem_file(key_path)
+                .map_err(|error| format!("could not parse PostgreSQL client key: {error}"))?;
+            builder
+                .with_client_auth_cert(cert_chain, key)
+                .map_err(|error| {
+                    format!("could not configure PostgreSQL client certificate: {error}")
+                })?
+        }
+        _ => builder.with_no_client_auth(),
+    };
+    Ok(tokio_postgres_rustls::MakeRustlsConnect::new(config))
+}
+
 // ─── Main ────────────────────────────────────────────────────────────────────
 
 #[tokio::main]
@@ -194,50 +254,54 @@ async fn main() {
         tracing_subscriber::fmt().with_env_filter(env_filter).init();
     }
 
+    let http_config = match HttpConfig::from_env() {
+        Ok(config) => config,
+        Err(error) => {
+            tracing::error!("invalid HTTP configuration: {error}");
+            std::process::exit(1);
+        }
+    };
+
     // Accept database URL from command-line argument (first positional arg) or environment variable
     let pg_url = {
         let args: Vec<String> = std::env::args().collect();
         if args.len() > 1 {
             args[1].clone()
         } else {
-            env_or("PG_RIPPLE_HTTP_PG_URL", "postgresql://localhost/postgres")
+            http_config.pg_url.clone()
         }
     };
-    let port: u16 = match env_or("PG_RIPPLE_HTTP_PORT", "7878").parse() {
-        Ok(p) => p,
-        Err(e) => {
-            tracing::error!("PG_RIPPLE_HTTP_PORT must be a valid port number: {e}");
-            std::process::exit(1);
+    if let Err(error) = http_config.validate_database_url(&pg_url) {
+        tracing::error!("invalid PostgreSQL configuration: {error}");
+        std::process::exit(1);
+    }
+    let port = http_config.bind.port();
+    let pool_size = http_config.pool_size;
+    let auth_token = http_config.auth_token.clone();
+    if auth_token.is_none() {
+        if http_config.allow_unauthenticated {
+            tracing::warn!(
+                "unauthenticated HTTP mode is enabled by PG_RIPPLE_HTTP_ALLOW_UNAUTHENTICATED"
+            );
+        } else {
+            tracing::warn!(
+                "PG_RIPPLE_HTTP_AUTH_TOKEN is not configured; protected requests will be rejected"
+            );
         }
-    };
-    let pool_size: usize = match env_or("PG_RIPPLE_HTTP_POOL_SIZE", "16").parse() {
-        Ok(n) => n,
-        Err(e) => {
-            tracing::error!("PG_RIPPLE_HTTP_POOL_SIZE must be a positive integer: {e}");
-            std::process::exit(1);
-        }
-    };
-    let auth_token = std::env::var("PG_RIPPLE_HTTP_AUTH_TOKEN").ok();
-    let datalog_write_token = std::env::var("PG_RIPPLE_HTTP_DATALOG_WRITE_TOKEN").ok();
-    let rate_limit: u32 = match env_or("PG_RIPPLE_HTTP_RATE_LIMIT", "100").parse() {
-        Ok(r) => r,
-        Err(e) => {
-            tracing::error!("PG_RIPPLE_HTTP_RATE_LIMIT must be a non-negative integer: {e}");
-            std::process::exit(1);
-        }
-    };
+    }
+    let datalog_write_token = http_config.write_token.clone();
+    let rate_limit = http_config.rate_limit;
     // CORS origins — empty string means no cross-origin access; "*" requires explicit opt-in.
-    let cors_origins = env_or("PG_RIPPLE_HTTP_CORS_ORIGINS", "");
-    // Body limit — default 10 MiB.
-    let max_body_bytes: usize = match env_or("PG_RIPPLE_HTTP_MAX_BODY_BYTES", "10485760").parse() {
-        Ok(n) => n,
-        Err(e) => {
-            tracing::error!("PG_RIPPLE_HTTP_MAX_BODY_BYTES must be a positive integer: {e}");
+    let cors_origins = &http_config.cors_origins;
+    let max_body_bytes = http_config.max_body_bytes;
+    // L18-01 (v0.131.0): parse trusted proxy networks before startup continues.
+    let trusted_proxy = match middleware::parse_trusted_proxy(http_config.trust_proxy.as_deref()) {
+        Ok(networks) => networks,
+        Err(error) => {
+            tracing::error!("{error}");
             std::process::exit(1);
         }
     };
-    // Trust proxy: comma-separated list of upstream IP/CIDR values trusted for X-Forwarded-For.
-    let trust_proxy = std::env::var("PG_RIPPLE_HTTP_TRUST_PROXY").ok();
 
     // ── v0.46.0: CA-bundle for outbound TLS (PG_RIPPLE_HTTP_CA_BUNDLE) ───────
     // If set, load the PEM file at the given path as the trust anchor for all
@@ -292,9 +356,10 @@ async fn main() {
     // Build connection pool.
     let mut cfg = Config::new();
     cfg.url = Some(pg_url.clone());
+    cfg.password = http_config.pg_password.clone();
     cfg.pool = Some(deadpool_postgres::PoolConfig::new(pool_size));
 
-    let pool = match cfg.create_pool(Some(Runtime::Tokio1), NoTls) {
+    let pool = match create_pg_pool(&cfg, &http_config) {
         Ok(p) => p,
         Err(e) => {
             tracing::error!("failed to create PostgreSQL connection pool: {e}");
@@ -308,7 +373,8 @@ async fn main() {
             Ok(c) => c,
             Err(e) => {
                 tracing::error!(
-                    "failed to connect to PostgreSQL — check PG_RIPPLE_HTTP_PG_URL: {e}"
+                    "failed to connect to PostgreSQL — check PG_RIPPLE_HTTP_PG_URL: {}",
+                    redact_sensitive(&e.to_string())
                 );
                 std::process::exit(1);
             }
@@ -325,7 +391,8 @@ async fn main() {
         };
         let count: i64 = row.get(0);
         tracing::info!(
-            "connected to {pg_url} (port {port}), triple store contains {count} triples"
+            "connected to {} (port {port}), triple store contains {count} triples",
+            redact_sensitive(&pg_url)
         );
 
         // COMPAT-01 (v0.71.0): verify that the installed pg_ripple extension is within
@@ -337,26 +404,26 @@ async fn main() {
     // S13-03 (v0.86.0): compute cors_is_permissive before building AppState.
     let cors_is_permissive = cors_origins == "*";
     // M16-22 (v0.115.0): optional metrics bearer token.
-    let metrics_token = std::env::var("PG_RIPPLE_HTTP_METRICS_TOKEN").ok();
+    let metrics_token = http_config.metrics_token.clone();
     if metrics_token.is_some() {
         tracing::info!(
             "PG_RIPPLE_HTTP_METRICS_TOKEN set: GET /metrics requires Authorization: Bearer <token>"
         );
     }
     // L16-06 (v0.117.0): configurable WWW-Authenticate realm.
-    let auth_realm =
-        std::env::var("PG_RIPPLE_HTTP_AUTH_REALM").unwrap_or_else(|_| "pg_ripple".to_owned());
+    let auth_realm = http_config.auth_realm.clone();
     tracing::debug!("auth realm: {auth_realm}");
 
     // Feature 12 (v0.120.0): optional read-replica pool.
-    let replica_pool = if let Ok(replica_dsn) = std::env::var("PG_RIPPLE_HTTP_REPLICA_DSN") {
+    let replica_pool = if let Some(replica_dsn) = &http_config.replica_dsn {
         if replica_dsn.trim().is_empty() {
             None
         } else {
             let mut replica_cfg = Config::new();
             replica_cfg.url = Some(replica_dsn.clone());
+            replica_cfg.password = http_config.pg_password.clone();
             replica_cfg.pool = Some(deadpool_postgres::PoolConfig::new(pool_size));
-            match replica_cfg.create_pool(Some(Runtime::Tokio1), NoTls) {
+            match create_pg_pool(&replica_cfg, &http_config) {
                 Ok(p) => {
                     tracing::info!(
                         "PG_RIPPLE_HTTP_REPLICA_DSN set: read-only SPARQL requests with ?replica=ok will be routed to the replica"
@@ -375,11 +442,24 @@ async fn main() {
         None
     };
 
+    let cancel_tls = match http_config.pg_sslmode {
+        PgSslMode::Disable => PgCancelTls::NoTls,
+        PgSslMode::Require | PgSslMode::VerifyCa | PgSslMode::VerifyFull => {
+            match pg_tls_connector(&http_config) {
+                Ok(connector) => PgCancelTls::Rustls(connector),
+                Err(error) => {
+                    tracing::error!("failed to prepare PostgreSQL cancellation TLS: {error}");
+                    std::process::exit(1);
+                }
+            }
+        }
+    };
+
     let state = Arc::new(AppState {
         pool,
         auth_token,
         datalog_write_token,
-        trust_proxy,
+        admin_token: http_config.admin_token.clone(),
         metrics: metrics::Metrics::new(),
         ever_connected: std::sync::atomic::AtomicBool::new(false),
         arrow_flight_secret: std::env::var("ARROW_FLIGHT_SECRET").ok(),
@@ -401,6 +481,7 @@ async fn main() {
         auth_realm,
         // Feature 12 (v0.120.0): optional read-replica pool.
         replica_pool,
+        cancel_tls,
     });
 
     // CORS layer — wildcard "*" requires explicit opt-in; empty means deny all cross-origin.
@@ -442,7 +523,10 @@ async fn main() {
         app = app.layer(GovernorLayer::new(Arc::new(governor_conf)));
     }
 
-    let addr = SocketAddr::from(([0, 0, 0, 0], port));
+    // This must be outermost so ConnectInfo is rewritten before governor extracts its key.
+    app = app.layer(TrustedProxyLayer::new(trusted_proxy));
+
+    let addr = http_config.bind;
     tracing::info!("pg_ripple_http listening on http://{addr}");
 
     let listener = match tokio::net::TcpListener::bind(addr).await {

@@ -19,7 +19,19 @@ extension version is outside its known-compatible range.
 
 | pg_ripple_http version | pg_ripple extension range | Notes |
 |------------------------|---------------------------|-------|
-| 0.127.x | ≥ 0.126.0 | pg_tide relay bridge migration: CDC bridge publishes named outbox events via `tide.outbox_publish`; current pg_tide pins use 0.33.0 and the stable `relay_set_*_v2` APIs |
+| 0.136.x | ≥ 0.135.0 | Hardened candidate for the frozen v1 query contract; external audit evidence is tracked separately |
+| 0.135.x | ≥ 0.135.0 | Typed query bindings, governed prefix mode, and stable v1 query manifest |
+| 0.133.x | ≥ 0.132.0 | Resilience health API and recovery qualification (v0.133.0) |
+| 0.134.x | ≥ 0.134.0 | Performance, scale, and true streaming qualification (v0.134.0) |
+| 0.132.x | ≥ 0.131.0 | Conformance evidence, feature and route truth checks, bounded predicate expansion, and keyset-paginated exports |
+| 0.131.x | ≥ 0.130.0 | Secure-by-default HTTP configuration, central route authorization, PostgreSQL TLS, outbound policy, and trusted-proxy enforcement |
+| 0.130.x | ≥ 0.129.0 | Installation/migration integrity: independent migration graph, schema fingerprints, and validated JSON writeback configuration API |
+| 0.129.x | ≥ 0.128.0 | JSON writeback and mutation integrity; async queue coverage and typed direct writeback |
+| 0.128.x | ≥ 0.127.0 | JSON mapping relational writeback API; breaking change: requires the v0.128 JSON writeback catalog and queue schema |
+| 0.127.x | ≥ 0.126.0 | pg_tide relay bridge migration; breaking change: uses named outbox events via `tide.outbox_publish` and `relay_set_*_v2` APIs |
+| 0.126.x | ≥ 0.125.0 | Federation credential-status and temporal snapshot APIs; breaking change: requires the v0.126 HTTP route and credential catalog additions |
+| 0.125.x | ≥ 0.124.0 | Temporal graph snapshot and diff APIs; breaking change: requires the v0.125 snapshot catalog and metrics |
+| 0.124.x | ≥ 0.123.0 | Rule-library observability and benchmark history APIs; breaking change: requires the v0.124 rule-library and benchmark catalog additions |
 | 0.123.x | ≥ 0.122.0 | A17 observability & docs: replica pool Prometheus gauges (OBS-M-01), rule-library stream latency/error counters (OBS-M-02), `bench_workload_result()` SQL wrapper (ERG-L-01) |
 | 0.122.x | ≥ 0.121.0 | A17 god-module decomposition & test coverage closure (H17-02); WatDiv correctness gating; pg_regress coverage for v0.119.0–v0.120.0 features |
 | 0.121.x | ≥ 0.120.0 | A17 security hardening (H17-01 SSRF, SEC-M-03 CGNAT/multicast, BUG-M-01 silent degradation, OBS-L-01 mutation journal); mutation journal for rule-library ops |
@@ -58,6 +70,7 @@ extension version is outside its known-compatible range.
 | 0.10.x | 0.38.0 – 0.39.x | Module restructuring, all 27 Datalog SQL functions |
 | 0.9.x | 0.33.0 – 0.37.x | Docs site rebuild, parallel Datalog, HTAP stability |
 | ≤ 0.8.x | 0.15.0 – 0.32.x | HTTP endpoint, bulk-load, basic SPARQL |
+
 
 ## Startup version check
 
@@ -100,6 +113,14 @@ companion. This means:
 3. Verify compatibility via `GET /ready` — returns `{"compatible": true}` when correctly paired.
 
 See also: [Arrow Flight Reference](../reference/arrow-flight.md), [HTTP API](../reference/http-api.md).
+
+## Pre-GA upgrade support policy
+
+Until v1.0.0, CI runs the complete historical sequential migration chain. Release qualification
+also tests direct upgrades from the six most recent published pre-GA release artifacts. After
+v1.0.0, each minor release supports direct upgrades from the two
+previous minor releases and sequential upgrades from older versions that remain in the migration
+graph.
 
 ## pg_tide / pg_trickle Extension Compatibility
 
@@ -144,4 +165,3 @@ CREATE EXTENSION pg_ripple;    -- RDF triple store (≥ 0.127.0)
 
 Call `pg_ripple.pg_tide_available()` to verify pg_tide is installed at runtime.
 Call `pg_ripple.pg_trickle_available()` to verify pg_trickle is installed at runtime.
-

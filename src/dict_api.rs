@@ -76,6 +76,31 @@ mod pg_ripple {
         })
     }
 
+    /// Return the SPARQL numeric promotion rank for an encoded term.
+    #[pg_extern]
+    fn numeric_type_code_spi(id: i64) -> Option<i32> {
+        use crate::dictionary::inline;
+        if inline::is_inline(id) {
+            return (inline::inline_type(id) == inline::TYPE_INTEGER).then_some(0);
+        }
+        Spi::get_one_with_args::<i32>(
+            "SELECT CASE \
+               WHEN datatype IN ('http://www.w3.org/2001/XMLSchema#double', \
+                                 'http://www.w3.org/2001/XMLSchema#float') THEN 2 \
+               WHEN datatype = 'http://www.w3.org/2001/XMLSchema#decimal' THEN 1 \
+               WHEN datatype IN ('http://www.w3.org/2001/XMLSchema#integer', \
+                                 'http://www.w3.org/2001/XMLSchema#long', \
+                                 'http://www.w3.org/2001/XMLSchema#int', \
+                                 'http://www.w3.org/2001/XMLSchema#short', \
+                                 'http://www.w3.org/2001/XMLSchema#byte') THEN 0 \
+               ELSE -1 END \
+             FROM _pg_ripple.dictionary WHERE id = $1",
+            &[pgrx::datum::DatumWithOid::from(id)],
+        )
+        .ok()
+        .flatten()
+    }
+
     /// Decode a dictionary `i64` to the lexical string value for use in
     /// GROUP_CONCAT aggregates.
     ///
@@ -477,11 +502,23 @@ mod pg_ripple {
         crate::storage::register_prefix(prefix, expansion);
     }
 
+    /// Drop a registered IRI prefix. Returns true when it existed.
+    #[pg_extern]
+    fn drop_prefix(prefix: &str) -> bool {
+        crate::storage::drop_prefix(prefix)
+    }
+
     /// Return all registered prefix → expansion mappings.
     #[pg_extern]
     fn prefixes() -> TableIterator<'static, (name!(prefix, String), name!(expansion, String))> {
         let pfxs = crate::storage::list_prefixes();
         TableIterator::new(pfxs)
+    }
+
+    /// Return the transactional prefix-registry generation.
+    #[pg_extern]
+    fn prefix_registry_generation() -> i64 {
+        crate::storage::prefix_registry_generation()
     }
 
     // ── XSD numeric formatting ─────────────────────────────────────────────────

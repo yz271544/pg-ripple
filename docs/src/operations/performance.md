@@ -1,6 +1,6 @@
 # Performance Tuning
 
-pg_ripple performance depends on three interacting subsystems: the query engine, the write path, and the dictionary cache. This page provides diagnostic steps and tuning recipes for each bottleneck area, with realistic numbers from BSBM benchmarks and internal testing.
+pg_ripple performance depends on three interacting subsystems: the query engine, the write path, and the dictionary cache. This page provides diagnostic steps and tuning recipes. Measure changes against your own retained baseline.
 
 ---
 
@@ -66,19 +66,9 @@ LIMIT 10;
 
 ## Query Performance
 
-### Typical Performance Numbers
+### Establish a baseline
 
-Based on BSBM benchmarks and internal testing with 10M triples on a 4-core/16GB instance:
-
-| Query Pattern | Typical Latency | Notes |
-|---|---|---|
-| Simple triple pattern (1 BGP) | 0.5–2ms | Single VP table scan with B-tree |
-| Star pattern (3–5 joins, same subject) | 2–10ms | Self-join elimination reduces to 1 scan + joins |
-| Path query (3 hops) | 5–20ms | WITH RECURSIVE, bounded depth |
-| Complex BGP (5–8 patterns) | 10–50ms | Benefits from `bgp_reorder` |
-| Aggregation (COUNT/SUM over 100K rows) | 20–80ms | PostgreSQL native aggregation |
-| DESCRIBE (CBD, 50 outgoing arcs) | 5–15ms | Depends on `describe_strategy` |
-| Federation (1 SERVICE call) | 50–500ms | Network-dominated |
+The repository does not publish current latency ranges for production-scale datasets. Capture `EXPLAIN`, fixture identity, hardware, software versions, and raw timings before and after each tuning change.
 
 ### Tuning: Slow Single Queries
 
@@ -111,7 +101,7 @@ SELECT pg_ripple.explain_sparql(
 SET pg_ripple.plan_cache_size = 512;
 ```
 
-The plan cache eliminates parse/optimize/generate overhead for repeated SPARQL patterns. With BSBM's mix of 12 query templates, a cache size of 256 achieves ~98% hit rate.
+The plan cache avoids repeated parse, optimization, and SQL-generation work for recurring SPARQL patterns. Size it from the observed working set.
 
 ### Tuning: Overall Query Throughput
 
@@ -129,22 +119,17 @@ max_parallel_workers = 8
 work_mem = '128MB'
 ```
 
-```admonish tip title="BGP reordering impact"
-On a 10M triple dataset with 5-pattern BGPs, enabling `bgp_reorder` reduces median query time from 45ms to 12ms — a 3.7x improvement. Always keep this on unless you have a specific reason to disable it.
+```admonish tip title="BGP reordering"
+Keep `bgp_reorder` enabled by default. Disable it only when retained plans and timings show a regression for your workload.
 ```
 
 ---
 
 ## Write Throughput
 
-### Typical Write Performance
+### Measure write performance
 
-| Operation | Throughput | Notes |
-|---|---|---|
-| `insert_triple()` (single) | 5,000–15,000 triples/sec | Per-backend, includes dictionary encoding |
-| `load_turtle()` (bulk, inline) | 30,000–80,000 triples/sec | Batch dictionary encoding |
-| `load_turtle_file()` (bulk, file) | 50,000–120,000 triples/sec | Streaming from disk, larger batches |
-| `sparql_update()` INSERT DATA | 10,000–30,000 triples/sec | SPARQL parse overhead |
+Use the bounded benchmark producer for a smoke measurement, then test the exact parser, batch size, durability settings, and storage used in production. The repository does not publish current production-scale throughput ranges.
 
 ### Tuning: Merge Worker Lag
 
@@ -277,7 +262,7 @@ work_mem = '256MB'
 random_page_cost = 1.1
 ```
 
-Expected: P95 query latency < 50ms for 5-pattern BGPs on 10M triples.
+Record the resulting P95 latency and compare it with your service-level objective.
 
 ### Write-Heavy Ingestion
 

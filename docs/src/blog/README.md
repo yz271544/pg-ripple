@@ -15,7 +15,7 @@ Individual posts are linked below.
 | Post | Summary |
 |------|---------|
 | [Why RDF Inside PostgreSQL?](https://github.com/trickle-labs/pg-ripple/blob/main/blog/why-rdf-in-postgresql.md) | The case for a triple store that lives where your data already is — no ETL pipeline, no separate cluster, no impedance mismatch. |
-| [Vertical Partitioning: One Table Per Predicate](https://github.com/trickle-labs/pg-ripple/blob/main/blog/vertical-partitioning-explained.md) | Inside pg_ripple's VP storage model and why it beats a single `(s, p, o)` table by 10–100× for selective queries. |
+| [Vertical Partitioning: One Table Per Predicate](https://github.com/trickle-labs/pg-ripple/blob/main/blog/vertical-partitioning-explained.md) | Inside pg_ripple's VP storage model and how it changes selective-query plans. |
 | [Everything Is an Integer](https://github.com/trickle-labs/pg-ripple/blob/main/blog/dictionary-encoding-integer-joins.md) | Dictionary encoding with XXH3-128: why string comparisons in a triple store are a performance bug. |
 | [How SPARQL Becomes a PostgreSQL Query Plan](https://github.com/trickle-labs/pg-ripple/blob/main/blog/sparql-to-sql-translation.md) | The translation pipeline from SPARQL text to `spargebra` algebra to SQL to SPI execution. |
 
@@ -24,7 +24,7 @@ Individual posts are linked below.
 | Post | Summary |
 |------|---------|
 | [HTAP for Triples: Reads and Writes at the Same Time](https://github.com/trickle-labs/pg-ripple/blob/main/blog/htap-reads-and-writes.md) | The delta/main/tombstone split that lets pg_ripple handle concurrent OLTP writes and analytical SPARQL queries without locking. |
-| [Leapfrog Triejoin: When Triangle Queries Meet Optimal Joins](https://github.com/trickle-labs/pg-ripple/blob/main/blog/leapfrog-triejoin.md) | Worst-case optimal joins compiled into PostgreSQL — what a 10–100× speedup looks like in practice. |
+| [Leapfrog Triejoin: When Triangle Queries Meet Optimal Joins](https://github.com/trickle-labs/pg-ripple/blob/main/blog/leapfrog-triejoin.md) | How worst-case optimal joins are compiled into PostgreSQL for cyclic queries. |
 | [Property Paths Are Just Recursive CTEs](https://github.com/trickle-labs/pg-ripple/blob/main/blog/property-paths-recursive-ctes.md) | SPARQL property paths compiled to `WITH RECURSIVE … CYCLE` using PostgreSQL 18's hash-based cycle detection. |
 
 ## Reasoning & Inference

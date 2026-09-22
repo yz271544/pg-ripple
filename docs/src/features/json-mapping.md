@@ -53,15 +53,22 @@ relational table — completing the full round-trip.
 
 ### Configuration
 
-Add writeback configuration to the mapping:
+Configure the relational target through the validated public API. This checks
+the relation, key columns, conflict policy, privileges, and target PostgreSQL
+types, then caches the casts atomically. Direct updates to `_pg_ripple` are not
+part of the public API.
 
 ```sql
-UPDATE _pg_ripple.json_mappings
-SET writeback_table        = 'contacts',
-    writeback_schema       = 'public',
-    writeback_key_columns  = ARRAY['contact_id'],
-    writeback_conflict_policy = 'replace'
-WHERE name = 'contacts';
+SELECT pg_ripple.configure_json_writeback(
+    'contacts', 'public', 'contacts', ARRAY['contact_id'], 'replace'
+);
+```
+
+Inspect the resolved target, cached column types, enabled state, and queue
+health:
+
+```sql
+SELECT * FROM pg_ripple.writeback_inspect('contacts');
 ```
 
 ### Conflict Policies
@@ -137,6 +144,13 @@ The status response mirrors `json_writeback_status()` for the selected mapping:
 }
 ```
 
+Validated writeback configuration and queue health are also available at:
+
+```bash
+curl http://localhost:7878/json-mapping/contacts/writeback/config \
+    -H "Authorization: Bearer $TOKEN"
+```
+
 Disable triggers:
 
 ```sql
@@ -151,10 +165,12 @@ Both `enable_json_writeback()` and `disable_json_writeback()` are idempotent.
 |---|---|
 | `PT0550` | `json mapping writeback target not configured` — `writeback_table` is NULL or `writeback_key_columns` is empty |
 | `PT0551` | `json mapping writeback conflict` — conflict detected with policy `'error'` |
+| `PT0552` | `json mapping writeback key column(s) have no asserted value` — a configured `writeback_key_columns` predicate was never asserted for this subject |
 
 ## See Also
 
 - [JSON-LD Reverse Mapping blog post](https://github.com/trickle-labs/pg-ripple/blob/main/blog/json-ld-reverse-mapping.md)
+- [JSON Writeback, and What It Took to Make It Actually Work](https://github.com/trickle-labs/pg-ripple/blob/main/blog/json-writeback-correctness.md)
 - [GUC reference: json_writeback_batch_size](../reference/guc-reference.md#pg_ripplejson_writeback_batch_size)
 - [HTTP API Reference](../reference/http-api.md#json-mapping-writeback)
 - [R2RML for complex ETL](r2rml.md)

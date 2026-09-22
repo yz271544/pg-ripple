@@ -44,16 +44,9 @@ ALTER SYSTEM SET pg_ripple.citus_service_pruning = on;
 SELECT pg_reload_conf();
 ```
 
-## Benchmark results
+## Verification
 
-On a 3-node Citus cluster with 32 shards per table, bound-subject SPARQL SERVICE queries show:
-
-| Condition | Shards queried | Latency (p50) |
-|-----------|----------------|----------------|
-| `citus_service_pruning = off` | 32 | ~45 ms |
-| `citus_service_pruning = on` | 1 | ~5 ms |
-
-*10× latency improvement on a 10 M-triple dataset with 1,000 triples per subject.*
+The repository does not retain raw evidence for a current multi-node latency comparison. Use `EXPLAIN` on the target cluster to verify the routing decision, then retain the plan, dataset identity, topology, and timings.
 
 To reproduce with `EXPLAIN`:
 
@@ -81,14 +74,11 @@ SELECT pg_ripple.explain_sparql(
 );
 ```
 
-The EXPLAIN output with pruning enabled includes `shards: 1` in the Citus plan node,
-compared to `shards: 32` without pruning.
+On a correctly configured cluster, compare the shard count in the two plans. Do not assume a specific latency improvement without measuring the target topology.
 
 ## Status
 
-`citus_service_pruning` is **experimental** in v0.71.0. The GUC and hook are wired;
-multi-node benchmark validation is documented above (CITUS-BENCH-01). Single-node CI
-tests verify the GUC and explain plumbing without requiring a Citus cluster.
+`citus_service_pruning` is experimental. Single-node CI tests verify the GUC and explain plumbing without Citus. They do not qualify multi-node routing, correctness, or performance.
 
 See also: [Approximate Aggregates (HLL)](approximate-aggregates.md), [Citus Integration](../operations/citus-integration.md),
 [Compatibility Matrix](../operations/compatibility.md).

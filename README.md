@@ -6,10 +6,10 @@
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
 [![PostgreSQL 18](https://img.shields.io/badge/PostgreSQL-18-blue?logo=postgresql&logoColor=white)](https://www.postgresql.org/)
 [![pgrx 0.18](https://img.shields.io/badge/pgrx-0.18-orange)](https://github.com/pgcentralfoundation/pgrx)
-[![WatDiv correctness](https://img.shields.io/badge/WatDiv-100%25%20correct-brightgreen)](docs/src/reference/watdiv-results.md)
-[![LUBM conformance](https://img.shields.io/badge/LUBM-14%2F14%20pass-brightgreen)](docs/src/reference/lubm-results.md)
-[![Jena conformance](https://img.shields.io/badge/Jena-%E2%89%A595%25%20pass-brightgreen)](docs/src/reference/jena-results.md)
-[![OWL 2 RL conformance](https://img.shields.io/badge/OWL%202%20RL-%E2%89%A595%25%20pass-brightgreen)](docs/src/reference/owl2rl-results.md)
+[![WatDiv evidence](https://img.shields.io/badge/WatDiv-versioned%20evidence-informational)](docs/src/reference/watdiv-results.md)
+[![LUBM conformance](https://img.shields.io/badge/LUBM-required%20gate-informational)](docs/src/reference/lubm-results.md)
+[![Jena conformance](https://img.shields.io/badge/Jena-informational%20suite-informational)](docs/src/reference/jena-results.md)
+[![OWL 2 RL conformance](https://img.shields.io/badge/OWL%202%20RL-informational%20suite-informational)](docs/src/reference/owl2rl-results.md)
 [![PPRL](https://img.shields.io/badge/PPRL-CLK%20%2B%20DP-purple)](docs/src/cookbook/pprl.md)
 [![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/trickle-labs/pg-ripple)
 
@@ -17,20 +17,24 @@
 
 pg_ripple is a PostgreSQL 18 extension that turns your database into a knowledge graph store. You can model data as a web of connected facts — entities, relationships, and properties — and then query, validate, and reason over those connections, all from within the database you already run.
 
+The [shared project glossary](GLOSSARY.md) defines the terms used in the code, documentation, and conversations around pg_ripple.
+
 No separate graph database. No data pipelines. No extra infrastructure.
 
 > **New to knowledge graphs?** Think of a knowledge graph as a smarter, more connected way to store data. Instead of rows in tables, you store facts: *Alice knows Bob*, *Bob works at Acme Corp*, *Acme Corp is in Oslo*. You can then ask questions that span many hops: *"Who are all the people in Alice's extended professional network?"* — the kind of question that is painful in SQL but natural in a graph.
 
 ---
 
-## What works today (v0.126.0)
+## What works today (v0.136.0)
 
-pg_ripple passes **100% of the W3C SPARQL 1.1, SHACL Core, and OWL 2 RL conformance test suites** — the industry benchmarks for correctness in knowledge graph systems. After 126 releases it covers the full feature set described below.
+pg_ripple publishes versioned conformance and feature evidence for each release.
+The locked 324-case W3C SPARQL 1.1 suite and LUBM are required gates. Jena,
+WatDiv, and OWL 2 RL remain informational.
 
 | What you can do | How it works |
 |---|---|
 | **Import knowledge** | Load data in standard formats: Turtle, N-Triples, N-Quads, TriG, or RDF/XML — from files, inline text, or remote URLs. Named graphs let you organize facts into logical groups (e.g. one graph per data source or topic). |
-| **Query with SPARQL** | Ask complex questions using SPARQL 1.1 — the W3C standard query language for linked data (similar to SQL, but designed for graphs). Follow chains of relationships, apply filters, aggregate results, and query across multiple graphs. Fully W3C conformant. Configurable DoS limits (`pg_ripple.sparql_max_algebra_depth`, `pg_ripple.sparql_max_triple_patterns`) reject malformed deep queries at parse time. |
+| **Query with SPARQL** | Ask complex questions using SPARQL 1.1 — the W3C standard query language for linked data (similar to SQL, but designed for graphs). Follow chains of relationships, apply filters, aggregate results, and query across multiple graphs. Typed application bindings are available on SELECT, ASK, CONSTRUCT, DESCRIBE, and cursor overloads. Prefix lookup stays strict by default; `pg_ripple.sparql_prefix_mode = 'registered'` enables the governed registry. |
 | **AI and LLM integration** | Store vector embeddings alongside graph facts. Combine semantic similarity search (*"find things similar to X"*) with SPARQL graph traversal in one query. Built-in RAG pipeline retrieves graph-contextualized context for language model prompts. Use `sparql_construct_jsonld()` with a JSON-LD frame to generate structured, token-efficient system prompts directly from a SPARQL CONSTRUCT query. |
 | **Microsoft GraphRAG** | Export entities and relationships in GraphRAG's BYOG (Bring Your Own Graph) Parquet format. Enrich the graph with Datalog rules. Validate export quality with SHACL. Connect your knowledge graph to Microsoft's GraphRAG pipeline with a single SQL call. |
 | **Validate data quality** | Define quality rules with SHACL: *"every Person must have exactly one name"*, *"age must be a positive integer"*. Violations are caught on insert (immediate feedback) or checked in the background. Full SHACL Core conformance, including `sh:equals`, `sh:disjoint`, and complex property path traversal (inverse, alternative, sequence, zero-or-more, one-or-more). Violation reports include decoded focus-node IRIs for easy debugging. |
@@ -38,9 +42,9 @@ pg_ripple passes **100% of the W3C SPARQL 1.1, SHACL Core, and OWL 2 RL conforma
 | **Stream and inspect queries** | Use `sparql_cursor()` to stream large result sets page-by-page via the PostgreSQL portal API — peak memory is bounded by `pg_ripple.export_batch_size`, not the full result set. Export results as W3C CSV or TSV via `sparql_csv()` / `sparql_tsv()`. Use `explain_sparql()` and `explain_datalog()` to introspect query plans and rule compilation. Pass `citus := true` to `explain_sparql()` for a Citus shard-pruning section showing which shard the query was pruned to and how many rows were avoided. `streaming_metrics()` returns live atomic counters for cursor pages, Arrow batches, and ticket rejections. OpenTelemetry span tracing is available, with a configurable OTLP endpoint (`pg_ripple.tracing_otlp_endpoint`). |
 | **Live change notifications** | Subscribe to graph changes via PostgreSQL NOTIFY or Server-Sent Events (SSE). `create_subscription(name, filter_sparql)` fires `pg_notify` on the `pg_ripple_cdc_{name}` channel when matching triples change. `subscribe_sparql(id, query, graph_iri)` registers a SPARQL-query subscription that re-executes after each graph write and streams results as SSE via `GET /subscribe/{id}` in `pg_ripple_http`. `unsubscribe_sparql(id)` removes a subscription; `list_sparql_subscriptions()` enumerates active ones. CDC lifecycle events (`pg_ripple.cdc_lifecycle_events`) record subscription activity. |
 | **Export and share** | Export your graph as Turtle, N-Triples, JSON-LD, or RDF/XML. Use JSON-LD framing to produce nested documents shaped for REST APIs or LLM prompts. `export_jsonld_node(iri)` returns all triples for a given subject as a JSON-LD document. `json_ld_load(document, default_graph)` ingests multi-graph JSON-LD documents in one call. `COPY rdf FROM` loads bulk RDF files directly via PostgreSQL's COPY protocol. Arrow IPC bulk export via `pg_ripple_http`: HMAC-SHA256 signed tickets with nonce replay protection, binary IPC stream over `POST /flight/do_get`. |
-| **Standard HTTP endpoint** | The companion `pg_ripple_http` service exposes a W3C SPARQL Protocol endpoint over HTTP/HTTPS. Supports JSON, XML, CSV, Turtle, and JSON-LD responses; authentication; Prometheus metrics (`/metrics`); extension-level metrics via `/metrics/extension` (triple count, active graphs, GUC settings); Docker Compose for easy deployment; full OpenAPI 3.1 specification; and an Arrow/Flight bulk-export endpoint. |
+| **Standard HTTP endpoint** | The companion `pg_ripple_http` service exposes a W3C SPARQL Protocol endpoint over HTTP/HTTPS. Supports JSON, XML, CSV, Turtle, and JSON-LD responses; typed initial bindings at `POST /sparql/bindings`; authentication; Prometheus metrics (`/metrics`); extension-level metrics via `/metrics/extension` (triple count, active graphs, GUC settings); Docker Compose for easy deployment; full OpenAPI 3.1 specification; and an Arrow/Flight bulk-export endpoint. |
 | **Query remote graph services** | Use the SPARQL `SERVICE` keyword to query external SPARQL endpoints as part of a single query — your local data and a remote public dataset in one request. Includes connection pooling, result caching, safe timeouts, and a circuit breaker (`pg_ripple.federation_circuit_breaker_threshold`) that stops retrying failed endpoints. |
-| **Horizontal scaling with Citus** | Enable `pg_ripple.citus_sharding_enabled` to distribute VP tables across Citus worker nodes. Bound-subject SPARQL patterns are automatically pruned to the correct shard (10–100× speedup). `citus_rebalance()` emits NOTIFY signals so pg-trickle can pause CDC during rebalancing. `citus_rebalance_progress()` reports live shard-move status. |
+| **Experimental horizontal scaling with Citus** | Citus integration is available for bounded pilots. Current CI checks single-node contracts and graceful degradation without Citus. It does not qualify a multi-worker cluster. |
 | **Temporal RDF queries** | `point_in_time(ts TIMESTAMPTZ)` restricts all SPARQL queries in the current session to facts that existed at the given timestamp — enabling as-of queries, audit trails, and temporal joins without schema changes. |
 | **PROV-O data provenance** | Enable `pg_ripple.prov_enabled` to automatically record W3C PROV-O `prov:Activity` + `prov:Entity` triples for every bulk-load operation. `prov_stats()` summarises load history. |
 | **Geospatial queries** | GeoSPARQL 1.1: filter by `geof:within`, `geof:intersects`, and `geof:distance`; compute `geof:buffer`, `geof:convexHull`, `geof:envelope`. Geometry values stored as WKT literals and processed via PostGIS. |
@@ -50,7 +54,7 @@ pg_ripple passes **100% of the W3C SPARQL 1.1, SHACL Core, and OWL 2 RL conforma
 | **Multi-tenant graph isolation** | `create_tenant()` registers a named graph with a triple-count quota. Triggers enforce the quota on insert; `tenant_stats()` reports usage per tenant. |
 | **SPARQL-DL OWL axiom queries** | `sparql_dl_subclasses(IRI)` and `sparql_dl_superclasses(IRI)` route OWL vocabulary BGPs (`owl:subClassOf`, `owl:equivalentClass`, `owl:disjointWith`) directly to VP table T-Box data — no separate index required. |
 | **SHACL-SPARQL rules** | SHACL Advanced Features: `sh:SPARQLRule` and `sh:SPARQLConstraint` are evaluated as native SPARQL queries against the VP store, enabling complex cross-shape validation that cannot be expressed with pure property-path SHACL. |
-| **JSON↔RDF mapping registry** | Register named bidirectional JSON↔RDF mappings with `register_json_mapping(name, context_jsonb, shape_iri)`. `ingest_json(mapping, document)` converts a JSON document to RDF triples using the stored context; `export_json_node(mapping, iri)` converts a graph node back to JSON. Mapping inconsistencies with the optional SHACL shape are recorded in `_pg_ripple.json_mapping_warnings`. |
+| **JSON↔RDF mapping registry** | Register named bidirectional JSON↔RDF mappings with `register_json_mapping(name, context_jsonb, shape_iri)`. `ingest_json(mapping, document)` converts a JSON document to RDF triples using the stored context; `export_json_node(mapping, iri)` converts a graph node back to JSON. Mapping inconsistencies with the optional SHACL shape are recorded in `_pg_ripple.json_mapping_warnings`. `writeback_json_row()` / `writeback_json_row_delete()` push RDF graph changes back into the source relational table (conflict policies `replace`/`skip`/`error`); `enable_json_writeback()` installs triggers — covering both not-yet-promoted and already-promoted predicates — so changes are queued and applied automatically. |
 | **R2RML direct mapping** | `pg_ripple.r2rml_load(mapping_ttl)` applies an R2RML mapping document to convert relational tables in the same database into RDF triples, inserted directly into the VP store. |
 | **Graph analytics (PageRank)** | Datalog-native iterative PageRank via `pg_ripple.pagerank_run()`. Supports topic-sensitive, personalized, confidence-weighted, and temporal-decay variants. Incremental refresh via IVM dirty-edge queue. Four centrality measures (betweenness, closeness, degree, Katz). `pg:pagerank()` SPARQL function. Score-explanation trees via `explain_pagerank()`. Sketch-based approximate top-N. SHACL-aware ranking. Standard-format export (CSV, Turtle, N-Triples, JSON-LD). |
 | **Probabilistic reasoning** | `@weight(FLOAT)` annotations on Datalog rules for probabilistic inference with noisy-OR confidence propagation. `pg:confidence()`, `pg:fuzzy_match()`, `pg:token_set_ratio()` SPARQL functions. Soft SHACL scoring (`shacl_score()`). Confidence-weighted bulk load. PROV-O source-trust propagation. Cyclic probabilistic programs with well-founded convergence guarantees. |
@@ -177,7 +181,39 @@ Token budgets matter. `sparql_construct_jsonld()` takes a SPARQL CONSTRUCT query
 
 ## Where we're headed
 
-One release remains on the path to v1.0.0.
+v0.128.1 was an out-of-band safety patch — a router-construction crash in the
+`pg_ripple_http` companion, a Docker image default that accepted passwordless
+remote database connections, and an async JSON-writeback path that could
+report itself enabled without full coverage. v0.129.0 repairs that async
+writeback path for real: a wrong dictionary column name had made it silently
+non-functional, and enqueue coverage now extends to not-yet-promoted
+predicates and main-resident deletes (see "JSON↔RDF mapping registry" above).
+v0.131.0 added secure-by-default HTTP startup, typed secret/TLS configuration,
+central route authorization, outbound request policy, and versioned conformance
+evidence. v0.132.0 added immutable corpus locks, non-skippable required
+conformance semantics, feature evidence, route/OpenAPI truth checks, bounded
+variable-predicate expansion, keyset exports, and a complete release evidence
+bundle. v0.134.0 adds direct, bounded HTTP streaming for JSON, CSV, TSV, and
+N-Triples responses, with typed RDF terms, backpressure, deadlines,
+cancellation, and connection cleanup. See
+[roadmap/v0.134.0.md](roadmap/v0.134.0.md).
+
+v0.135.0 adds typed initial bindings for the SQL and HTTP query APIs, governed
+prefix resolution with strict defaults, and the stable v1 query manifest. See
+[roadmap/v0.135.0.md](roadmap/v0.135.0.md).
+
+v0.136.0 carries the hardened candidate release metadata, migration path,
+compatibility correction, and audit-readiness checks for the frozen v1 query
+contract. See [roadmap/v0.136.0.md](roadmap/v0.136.0.md).
+
+v0.133.0 added resilience scripts and runbooks for crash recovery, backup and
+restore, failover, PITR, and resource pressure. Current CI validates their
+mappings, syntax, and documentation. Operators must run the live matrix on a
+disposable topology. The release also added the `pg_ripple.health()` operations
+API. See
+[ROADMAP.md](ROADMAP.md#production-readiness--ga-qualification-v01281--v01430)
+for the remaining v0.134.0–v0.143.0 production-readiness sequence ahead of
+v1.0.0.
 
 The v0.91.0–v0.111.0 development cycle adds deep reasoning capabilities: proof trees and justification infrastructure (v0.100.0), natural-language explanation of derived facts via LLM or deterministic fallback (v0.101.0), what-if hypothetical inference (v0.102.0), Datalog conflict detection (v0.103.0), versioned domain rule libraries (v0.104.0), guided rule authoring with LLM-backed NL-to-Datalog translation (v0.105.0), first-class temporal fact store with AFTER/BEFORE/DURING operators and CDC integration (v0.106.0–v0.107.0), Bayesian confidence updates with evidence log and derivation-DAG propagation (v0.108.0), neuro-symbolic record linkage with six string-similarity built-ins and a five-stage `resolve_entities()` pipeline (v0.109.0), NS-RL evaluation harness with live ER monitoring stream tables and rule explainability (v0.110.0), and Privacy-Preserving Record Linkage via CLK Bloom-filter encoding and differential-privacy aggregates (v0.111.0). Every row in `pg_ripple.feature_status()` shows `implemented`.
 
@@ -185,7 +221,7 @@ The v0.112.0–v0.126.0 cycle focuses on hardening, correctness, and operational
 
 ### v1.0.0 — Production Release
 
-The final milestone: full API and documentation freeze, long-term support commitment, and public production dossier. All conformance suites (SPARQL 1.1, SHACL Core, OWL 2 RL, LUBM) remain required gates; performance regression CI and the release evidence dashboard are mandatory artifacts.
+The final milestone includes the API and documentation freeze, long-term support commitment, and public production dossier. SPARQL 1.1, SHACL Core, OWL 2 RL, and LUBM are intended to become required gates. Current-version performance artifacts are also required before v1.0.0.
 
 ---
 
@@ -202,7 +238,7 @@ This means you get:
 
 ### How it compares
 
-> **Note**: pg_ripple features marked "Yes" in the table below are implemented across v0.1.0–v0.126.0. W3C SPARQL 1.1 Query, Update, SHACL Core, and OWL 2 RL conformance is 100%. Competitor capabilities reflect publicly documented feature sets.
+> **Note**: pg_ripple features marked "Yes" in the table below are implemented across v0.1.0–v0.133.0. Current conformance status is defined by the versioned release-evidence bundle. Competitor capabilities reflect publicly documented feature sets.
 
 | Capability | pg_ripple | Blazegraph | Virtuoso | Apache Fuseki |
 |---|---|---|---|---|
@@ -383,22 +419,22 @@ CREATE EXTENSION pg_ripple;
 
 ## Quality & Testing
 
-pg_ripple is built to production-grade standards:
+The following checks describe the current repository state:
 
-- **W3C conformance** — 100% pass rate on the official SPARQL 1.1 Query, SPARQL 1.1 Update, and SHACL Core test suites (~3 000 tests, parallelized, complete in under 2 minutes)
+- **W3C SPARQL CI suite** — the locked 324-case suite runs serially and is required. The checked v0.136.0 report records 324/324 with no skips or unexpected failures.
 - **Apache Jena test suite** — ~1 000 additional tests covering XSD numeric promotions, timezone-aware date/time, blank-node scoping, and all SPARQL string functions
-- **WatDiv benchmark** — all 100 WatDiv query templates (star, chain, snowflake, complex) validated for correctness against a 10 M-triple dataset with ±0.1% row-count baselines
+- **WatDiv query smoke suite** — 32 checked-in templates execute in the informational job. The current job does not load or qualify a 10 M-triple dataset.
 - **LUBM conformance suite** — all 14 canonical LUBM queries pass against a synthetic university OWL ontology; includes a Datalog validation sub-suite confirming that `infer('owl-rl')` produces correct supertype entailments (v0.44.0)
-- **W3C OWL 2 RL conformance suite** — W3C OWL 2 RL test manifests (entailment, consistency, and inconsistency tests) run in CI; **100% pass rate (66/66) achieved at v0.51.0** — blocking gate in CI (v0.51.0)
+- **W3C OWL 2 RL source check** — CI downloads and checksum-validates the pinned W3C corpus. Historical harness results are not current-release conformance evidence.
 - **Property-based testing** — `proptest` suites assert algebraic invariants: SPARQL algebra round-trips produce byte-identical SQL, dictionary encode/decode is always stable and collision-free for 10,000 random distinct terms, JSON-LD framing preserves all matching IRIs (v0.51.0)
 - **Extensive test suite** — 300+ pg_regress tests and property-based (`proptest`) suites cover every SQL-exposed function, every feature, and every edge case (as of v0.126.0)
 - **Security testing** — resistance to injection attacks, malformed inputs, and resource exhaustion
 - **Fuzz testing** — the federation result decoder, query pipeline, and URL host parser are continuously fuzz-tested (nightly, 120 s per target); arbitrary XML/JSON from remote SERVICE endpoints cannot cause a crash or panic (v0.51.0)
-- **Performance regression CI** — BSBM benchmark (1M-triple product dataset, 12 explore queries) and automated throughput benchmarks fail the build if performance drops by more than 10% (v0.51.0)
+- **BSBM execution gate** — CI generates about one million triples, asserts the fixture size, and runs the adapted 12-query mix with SQL errors treated as failures. No latency regression threshold is claimed until enough comparable runs exist.
 - **Security CI** — `cargo audit --deny warnings` runs on every pull request; SBOM (CycloneDX) generated and attached to every release; GitHub Actions refs pinned to full SHA; Docker release images scanned via Trivy with immutable digest
-- **Stability** — 72-hour soak test with published artifacts (memory trend, merge latency, query p50/p95/p99, error counts), memory leak detection, and crash recovery testing (v0.67.0)
+- **Stability tooling** — the repository includes a soak harness and live crash/recovery scripts. Current CI validates the scripts but does not execute a 72-hour soak, PITR, or failover matrix.
 - **Upgrade and backup acceptance** — migration chain from all supported 0.x versions, `pg_dump`/restore round trip, and rollback guidance tested in CI (v0.67.0)
-- **Public benchmark baselines** — BSBM, WatDiv, LUBM, bulk N-Triples/Turtle load, HTAP merge throughput, construct-rule incremental maintenance, Datalog DRed, vector hybrid search, Arrow IPC export, Citus fan-out, bidi relay throughput, and Magellan ER benchmark (Abt-Buy, DBLP-ACM) published with hardware, dataset size, and raw output; baselines refreshed to v0.126.0
+- **Performance evidence** — `benchmarks/ci_benchmark.sh` produces a bounded current-version JSON result and raw log. Older merge and PageRank CSV files are historical and lack enough provenance for current capacity decisions.
 
 ---
 
