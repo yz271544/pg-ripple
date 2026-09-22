@@ -251,6 +251,52 @@ impl RdfBindingValue {
         }
     }
 
+    /// Encode this typed binding using the W3C SPARQL Results XML term shape.
+    pub fn to_sparql_xml(&self) -> Result<String, StreamError> {
+        match self {
+            Self::Iri(value) => {
+                non_empty(value, "IRI")?;
+                Ok(format!("<uri>{}</uri>", xml_escape(value)))
+            }
+            Self::BlankNode(label) => {
+                if !valid_bnode(label) {
+                    return Err(invalid(format!("invalid blank-node label: {label}")));
+                }
+                Ok(format!("<bnode>{}</bnode>", xml_escape(label)))
+            }
+            Self::Literal {
+                lexical,
+                datatype,
+                language,
+            } => {
+                if datatype.is_some() && language.is_some() {
+                    return Err(invalid("literal cannot have both datatype and language"));
+                }
+                let lexical = xml_escape(lexical);
+                if let Some(language) = language {
+                    if !valid_language(language) {
+                        return Err(invalid(format!("invalid language tag: {language}")));
+                    }
+                    Ok(format!(
+                        "<literal xml:lang=\"{}\">{lexical}</literal>",
+                        xml_escape(language)
+                    ))
+                } else if let Some(datatype) = datatype {
+                    non_empty(datatype, "literal datatype")?;
+                    Ok(format!(
+                        "<literal datatype=\"{}\">{lexical}</literal>",
+                        xml_escape(datatype)
+                    ))
+                } else {
+                    Ok(format!("<literal>{lexical}</literal>"))
+                }
+            }
+            Self::Triple(_) => Err(invalid(
+                "RDF-star quoted triples are not supported by SPARQL Results XML 1.1",
+            )),
+        }
+    }
+
     fn to_delimited_value(&self) -> Result<String, StreamError> {
         match self {
             Self::Iri(value) => Ok(escape_iri(value)),
@@ -343,6 +389,31 @@ pub(crate) fn row_json(row: &ResultBindingRow, variables: &[String]) -> Value {
         }
     }
     Value::Object(object)
+}
+
+pub(crate) fn row_xml(row: &ResultBindingRow, variables: &[String]) -> Result<String, StreamError> {
+    let mut result = String::from("    <result>\n");
+    for variable in variables {
+        let Some(Some(value)) = row.value(variable) else {
+            continue;
+        };
+        result.push_str(&format!(
+            "      <binding name=\"{}\">{}</binding>\n",
+            xml_escape(variable),
+            value.to_sparql_xml()?
+        ));
+    }
+    result.push_str("    </result>\n");
+    Ok(result)
+}
+
+pub(crate) fn xml_escape(value: &str) -> String {
+    value
+        .replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+        .replace('"', "&quot;")
+        .replace('\'', "&apos;")
 }
 
 pub(crate) fn row_delimited(

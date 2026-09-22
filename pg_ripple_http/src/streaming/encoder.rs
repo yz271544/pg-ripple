@@ -1,11 +1,13 @@
 use super::terms::{
-    QueryForm, RdfBindingValue, ResultBindingRow, ResultMetadata, row_delimited, row_json,
+    QueryForm, RdfBindingValue, ResultBindingRow, ResultMetadata, row_delimited, row_json, row_xml,
+    xml_escape,
 };
 use super::{StreamError, invalid};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum StreamFormat {
     SparqlJson,
+    SparqlXml,
     Csv,
     Tsv,
     NTriples,
@@ -15,6 +17,7 @@ impl StreamFormat {
     pub fn content_type(self) -> &'static str {
         match self {
             Self::SparqlJson => "application/sparql-results+json",
+            Self::SparqlXml => "application/sparql-results+xml",
             Self::Csv => "text/csv",
             Self::Tsv => "text/tab-separated-values",
             Self::NTriples => "application/n-triples",
@@ -40,6 +43,7 @@ impl StreamingEncoder {
             (QueryForm::Select, StreamFormat::NTriples)
             | (QueryForm::Ask, StreamFormat::NTriples)
             | (QueryForm::Construct | QueryForm::Describe, StreamFormat::SparqlJson)
+            | (QueryForm::Construct | QueryForm::Describe, StreamFormat::SparqlXml)
             | (QueryForm::Construct | QueryForm::Describe, StreamFormat::Csv)
             | (QueryForm::Construct | QueryForm::Describe, StreamFormat::Tsv) => Err(invalid(
                 "result format is not valid for this SPARQL query form",
@@ -65,6 +69,19 @@ impl StreamingEncoder {
             )
             .into_bytes(),
             (QueryForm::Ask, StreamFormat::SparqlJson) => b"{\"head\":{},\"boolean\":".to_vec(),
+            (QueryForm::Select, StreamFormat::SparqlXml) => format!(
+                "<?xml version=\"1.0\"?>\n<sparql xmlns=\"http://www.w3.org/2005/sparql-results#\">\n  <head>\n{}  </head>\n  <results>\n",
+                self.metadata
+                    .variables
+                    .iter()
+                    .map(|variable| format!(
+                        "    <variable name=\"{}\"/>\n",
+                        xml_escape(variable)
+                    ))
+                    .collect::<String>()
+            )
+            .into_bytes(),
+            (QueryForm::Ask, StreamFormat::SparqlXml) => b"<?xml version=\"1.0\"?>\n<sparql xmlns=\"http://www.w3.org/2005/sparql-results#\">\n  <head/>\n".to_vec(),
             (QueryForm::Select, StreamFormat::Csv) => {
                 format!("{}\n", self.metadata.variables.join(",")).into_bytes()
             }
@@ -101,6 +118,10 @@ impl StreamingEncoder {
                 )
                 .into_bytes())
             }
+            StreamFormat::SparqlXml => {
+                self.emitted_row = true;
+                row_xml(row, &self.metadata.variables).map(String::into_bytes)
+            }
             StreamFormat::Csv => {
                 self.emitted_row = true;
                 row_delimited(row, &self.metadata.variables, ',', true).map(String::into_bytes)
@@ -122,6 +143,7 @@ impl StreamingEncoder {
         self.emitted_boolean = true;
         match self.format {
             StreamFormat::SparqlJson => Ok(format!("{value}").into_bytes()),
+            StreamFormat::SparqlXml => Ok(format!("  <boolean>{value}</boolean>\n").into_bytes()),
             StreamFormat::Csv | StreamFormat::Tsv => Ok(format!("{value}\n").into_bytes()),
             StreamFormat::NTriples => unreachable!("validated in StreamingEncoder::new"),
         }
@@ -167,6 +189,15 @@ impl StreamingEncoder {
             (QueryForm::Select, StreamFormat::SparqlJson) => Ok(b"]}}".to_vec()),
             (QueryForm::Ask, StreamFormat::SparqlJson) if self.emitted_boolean => Ok(b"}".to_vec()),
             (QueryForm::Ask, StreamFormat::SparqlJson) => {
+                Err(invalid("ASK stream is missing its boolean result"))
+            }
+            (QueryForm::Select, StreamFormat::SparqlXml) => {
+                Ok(b"  </results>\n</sparql>\n".to_vec())
+            }
+            (QueryForm::Ask, StreamFormat::SparqlXml) if self.emitted_boolean => {
+                Ok(b"</sparql>\n".to_vec())
+            }
+            (QueryForm::Ask, StreamFormat::SparqlXml) => {
                 Err(invalid("ASK stream is missing its boolean result"))
             }
             (QueryForm::Select | QueryForm::Ask, StreamFormat::Csv | StreamFormat::Tsv)

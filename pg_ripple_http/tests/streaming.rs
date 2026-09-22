@@ -16,6 +16,46 @@ fn empty_results_keep_valid_headers_and_footers() {
 }
 
 #[test]
+fn sparql_xml_preserves_iri_language_and_datatype_terms() {
+    let metadata =
+        ResultMetadata::select(vec!["iri".into(), "label".into(), "count".into()]).unwrap();
+    let row = ResultBindingRow::from_json(&json!({
+        "iri": {"type": "uri", "value": "urn:example:item"},
+        "label": {"type": "literal", "value": "Alice & Bob", "xml:lang": "en"},
+        "count": {
+            "type": "literal",
+            "value": "42",
+            "datatype": "http://www.w3.org/2001/XMLSchema#integer"
+        }
+    }))
+    .unwrap();
+    let mut encoder = StreamingEncoder::new(StreamFormat::SparqlXml, metadata).unwrap();
+    let mut output = encoder.start().unwrap();
+    output.extend(encoder.encode_row(&row).unwrap());
+    output.extend(encoder.finish().unwrap());
+    let output = String::from_utf8(output).unwrap();
+    assert!(output.contains("<uri>urn:example:item</uri>"));
+    assert!(output.contains("<literal xml:lang=\"en\">Alice &amp; Bob</literal>"));
+    assert!(
+        output.contains(
+            "<literal datatype=\"http://www.w3.org/2001/XMLSchema#integer\">42</literal>"
+        )
+    );
+}
+
+#[test]
+fn sparql_xml_ask_uses_boolean_element() {
+    let metadata = ResultMetadata::new(QueryForm::Ask, vec!["result".into()]).unwrap();
+    let mut encoder = StreamingEncoder::new(StreamFormat::SparqlXml, metadata).unwrap();
+    let mut output = encoder.start().unwrap();
+    output.extend(encoder.encode_boolean(true).unwrap());
+    output.extend(encoder.finish().unwrap());
+    let output = String::from_utf8(output).unwrap();
+    assert!(output.contains("<head/>"));
+    assert!(output.contains("<boolean>true</boolean>"));
+}
+
+#[test]
 fn typed_terms_round_trip_through_json_and_ntriples() {
     let row = ResultBindingRow::from_json(&json!({
         "iri": {"type": "uri", "value": "https://example.test/a"},

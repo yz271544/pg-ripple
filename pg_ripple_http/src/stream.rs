@@ -685,6 +685,9 @@ fn stream_format(form: QueryForm, accept: &str) -> Option<StreamFormat> {
         (QueryForm::Select | QueryForm::Ask, "application/sparql-results+json") => {
             Some(StreamFormat::SparqlJson)
         }
+        (QueryForm::Select | QueryForm::Ask, "application/sparql-results+xml") => {
+            Some(StreamFormat::SparqlXml)
+        }
         (QueryForm::Select | QueryForm::Ask, "text/csv") => Some(StreamFormat::Csv),
         (QueryForm::Select | QueryForm::Ask, "text/tab-separated-values") => {
             Some(StreamFormat::Tsv)
@@ -747,6 +750,6 @@ mod tests {
             "PREFIX ex: <https://example.test/> CONSTRUCT { ?s ?p ?o } WHERE { ?s ?p ?o }",
             "application/n-triples"
         ));
-        assert!(!is_streamable(query, "application/sparql-results+xml"));
+        assert!(is_streamable(query, "application/sparql-results+xml"));
     }
 }

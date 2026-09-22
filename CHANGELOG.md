@@ -21,8 +21,9 @@ Versions correspond to the milestones in [ROADMAP.md](ROADMAP.md).
 - Clear the shared and backend-local dictionary encode caches before every
   server-side `load_*_file()` operation, preventing stale identifiers after a
   `DROP EXTENSION` / `CREATE EXTENSION` cycle.
-- Recognize angle-bracketed HTTP(S) IRIs in legacy SPARQL JSON and XML result
-  formatting instead of incorrectly returning them as literals.
+- Preserve typed RDF terms through every SPARQL HTTP SELECT path and add typed
+  SPARQL Results XML streaming, so arbitrary IRI schemes, blank nodes, language
+  tags, and datatypes are serialized without string-shape heuristics.
 - Use a Debian runtime for the standalone HTTP image so CA certificates and
   external health-probe tooling can be installed while retaining a non-root
   runtime user.

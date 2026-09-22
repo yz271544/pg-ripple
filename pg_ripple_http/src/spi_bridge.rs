@@ -136,32 +136,39 @@ pub(crate) async fn execute_sparql_with_bindings(
             .await;
     }
 
-    let query_rows = match query_kind {
-        "SELECT" | "ASK" => {
-            client
+    let query_rows =
+        match query_kind {
+            "SELECT" => client
                 .query(
-                    "SELECT result FROM pg_ripple.sparql($1, $2)",
+                    "SELECT result FROM _pg_ripple.sparql_stream_bindings_with_bindings($1, $2)",
                     &[&query_text, bindings],
                 )
-                .await
-        }
-        "CONSTRUCT" => {
-            client
-                .query(
-                    "SELECT result FROM pg_ripple.sparql_construct($1, $2)",
-                    &[&query_text, bindings],
-                )
-                .await
-        }
-        _ => {
-            client
-                .query(
-                    "SELECT result FROM pg_ripple.sparql_describe($1, $2, $3)",
-                    &[&query_text, bindings, &"cbd"],
-                )
-                .await
-        }
-    };
+                .await,
+            "ASK" => {
+                client
+                    .query(
+                        "SELECT result FROM pg_ripple.sparql($1, $2)",
+                        &[&query_text, bindings],
+                    )
+                    .await
+            }
+            "CONSTRUCT" => {
+                client
+                    .query(
+                        "SELECT result FROM pg_ripple.sparql_construct($1, $2)",
+                        &[&query_text, bindings],
+                    )
+                    .await
+            }
+            _ => {
+                client
+                    .query(
+                        "SELECT result FROM pg_ripple.sparql_describe($1, $2, $3)",
+                        &[&query_text, bindings, &"cbd"],
+                    )
+                    .await
+            }
+        };
     let rows = match query_rows {
         Ok(rows) => rows,
         Err(error) => {
@@ -357,7 +364,10 @@ async fn execute_select(
     start: Instant,
 ) -> Response {
     let rows = match client
-        .query("SELECT result FROM pg_ripple.sparql($1)", &[&query_text])
+        .query(
+            "SELECT result FROM _pg_ripple.sparql_stream_bindings($1)",
+            &[&query_text],
+        )
         .await
     {
         Ok(r) => r,

@@ -12,13 +12,14 @@ use crate::spi_bridge::{
     execute_sparql_with_bindings, execute_sparql_with_traceparent,
     execute_sparql_with_traceparent_routed,
 };
+use crate::streaming::ResultBindingRow;
 // Re-use types and constants declared in parent routing module.
 use super::{
     CT_CSV, CT_FORM, CT_JSONLD, CT_NTRIPLES, CT_SPARQL_JSON, CT_SPARQL_QUERY, CT_SPARQL_UPDATE,
     CT_SPARQL_XML, CT_TSV, CT_TURTLE, SparqlParams,
 };
 // Helper functions live in admin_handlers (extracted sibling module).
-use super::admin_handlers::{csv_escape, strip_angle, xml_escape};
+use super::admin_handlers::{csv_escape, strip_angle};
 
 #[derive(serde::Deserialize)]
 pub(crate) struct SparqlBindingsRequest {
@@ -394,7 +395,10 @@ pub(crate) fn negotiate_stream_accept(headers: &HeaderMap, query: &str) -> Strin
         .split(',')
         .map(|value| value.split(';').next().unwrap_or("").trim())
     {
-        if matches!(candidate, CT_SPARQL_JSON | CT_CSV | CT_TSV | CT_NTRIPLES) {
+        if matches!(
+            candidate,
+            CT_SPARQL_JSON | CT_SPARQL_XML | CT_CSV | CT_TSV | CT_NTRIPLES
+        ) {
             return candidate.to_owned();
         }
     }
@@ -422,82 +426,14 @@ pub(crate) fn format_select_results(results: &[serde_json::Value], accept: &str)
 }
 
 pub(crate) fn format_select_json(results: &[serde_json::Value]) -> Response {
-    // W3C SPARQL Results JSON format.
-    let vars: Vec<String> = results
-        .first()
-        .and_then(|r| r.as_object())
-        .map(|obj| obj.keys().cloned().collect())
-        .unwrap_or_default();
-
-    let bindings: Vec<serde_json::Value> = results
+    let (vars, rows) = match typed_select_rows(results) {
+        Ok(parsed) => parsed,
+        Err(error) => return invalid_typed_result(error),
+    };
+    let bindings = rows
         .iter()
-        .map(|row| {
-            let mut binding = serde_json::Map::new();
-            if let Some(obj) = row.as_object() {
-                for (key, val) in obj {
-                    if let Some(s) = val.as_str() {
-                        let mut term = serde_json::Map::new();
-                        // Classify the value into a W3C SPARQL JSON term type:
-                        //   * `uri`    — http://... or https://... (optionally
-                        //                 wrapped in <...> as emitted by pg_ripple's
-                        //                 N-Triples serialisation)
-                        //   * `bnode`  — `_:label`
-                        //   * `literal`— anything else, including angle-bracketed
-                        //                 values whose inner content is not a known
-                        //                 IRI scheme (kept as literal to avoid
-                        //                 silently mis-classifying unknown schemes).
-                        if s.starts_with("http://") || s.starts_with("https://") {
-                            term.insert("type".to_owned(), "uri".into());
-                            term.insert("value".to_owned(), s.into());
-                        } else if s.starts_with('_') && s.len() > 1 && s.as_bytes()[1] == b':' {
-                            // `_:` prefix means a labelled blank node.
-                            term.insert("type".to_owned(), "bnode".into());
-                            term.insert(
-                                "value".to_owned(),
-                                s.strip_prefix("_:").unwrap_or(s).into(),
-                            );
-                        } else if s.starts_with('<') && s.ends_with('>') {
-                            // Unwrap angle-bracketed IRIs from pg_ripple's N-Triples
-                            // output.  Only classify as `uri` if the inner content
-                            // looks like an http(s) IRI; otherwise keep the wrapped
-                            // value as a literal.
-                            let inner = &s[1..s.len() - 1];
-                            if inner.starts_with("http://") || inner.starts_with("https://") {
-                                term.insert("type".to_owned(), "uri".into());
-                                term.insert("value".to_owned(), inner.to_owned().into());
-                            } else {
-                                term.insert("type".to_owned(), "literal".into());
-                                term.insert("value".to_owned(), s.into());
-                            }
-                        } else {
-                            term.insert("type".to_owned(), "literal".into());
-                            term.insert("value".to_owned(), s.into());
-                        }
-                        binding.insert(key.clone(), serde_json::Value::Object(term));
-                    } else if val.is_number() {
-                        let mut term = serde_json::Map::new();
-                        term.insert("type".to_owned(), "literal".into());
-                        term.insert("value".to_owned(), val.to_string().into());
-                        term.insert(
-                            "datatype".to_owned(),
-                            "http://www.w3.org/2001/XMLSchema#integer".into(),
-                        );
-                        binding.insert(key.clone(), serde_json::Value::Object(term));
-                    } else if val.is_boolean() {
-                        let mut term = serde_json::Map::new();
-                        term.insert("type".to_owned(), "literal".into());
-                        term.insert("value".to_owned(), val.to_string().into());
-                        term.insert(
-                            "datatype".to_owned(),
-                            "http://www.w3.org/2001/XMLSchema#boolean".into(),
-                        );
-                        binding.insert(key.clone(), serde_json::Value::Object(term));
-                    }
-                }
-            }
-            serde_json::Value::Object(binding)
-        })
-        .collect();
+        .map(|row| typed_row_json(row, &vars))
+        .collect::<Vec<_>>();
 
     let body = serde_json::json!({
         "head": { "vars": vars },
@@ -519,50 +455,37 @@ pub(crate) fn format_select_json(results: &[serde_json::Value]) -> Response {
 }
 
 pub(crate) fn format_select_xml(results: &[serde_json::Value]) -> Response {
-    let vars: Vec<String> = results
-        .first()
-        .and_then(|r| r.as_object())
-        .map(|obj| obj.keys().cloned().collect())
-        .unwrap_or_default();
+    let (vars, rows) = match typed_select_rows(results) {
+        Ok(parsed) => parsed,
+        Err(error) => return invalid_typed_result(error),
+    };
 
     let mut xml = String::from("<?xml version=\"1.0\"?>\n");
     xml.push_str("<sparql xmlns=\"http://www.w3.org/2005/sparql-results#\">\n");
     xml.push_str("  <head>\n");
     for v in &vars {
-        xml.push_str(&format!("    <variable name=\"{v}\"/>\n"));
+        xml.push_str(&format!(
+            "    <variable name=\"{}\"/>\n",
+            super::admin_handlers::xml_escape(v)
+        ));
     }
     xml.push_str("  </head>\n");
     xml.push_str("  <results>\n");
 
-    for row in results {
+    for row in &rows {
         xml.push_str("    <result>\n");
-        if let Some(obj) = row.as_object() {
-            for (key, val) in obj {
-                xml.push_str(&format!("      <binding name=\"{key}\">"));
-                if let Some(s) = val.as_str() {
-                    // See `format_select_json` for the angle-bracket handling rationale.
-                    if s.starts_with('<') && s.ends_with('>') {
-                        let inner = &s[1..s.len() - 1];
-                        if inner.starts_with("http://") || inner.starts_with("https://") {
-                            xml.push_str(&format!("<uri>{}</uri>", xml_escape(inner)));
-                        } else {
-                            xml.push_str(&format!("<literal>{}</literal>", xml_escape(s)));
-                        }
-                    } else if s.starts_with("http://") || s.starts_with("https://") {
-                        xml.push_str(&format!("<uri>{}</uri>", xml_escape(s)));
-                    } else if s.starts_with("_:") {
-                        xml.push_str(&format!(
-                            "<bnode>{}</bnode>",
-                            xml_escape(s.strip_prefix("_:").unwrap_or(s))
-                        ));
-                    } else {
-                        xml.push_str(&format!("<literal>{}</literal>", xml_escape(s)));
-                    }
-                } else {
-                    xml.push_str(&format!("<literal>{}</literal>", val));
-                }
-                xml.push_str("</binding>\n");
-            }
+        for key in &vars {
+            let Some(Some(value)) = row.value(key) else {
+                continue;
+            };
+            let term = match value.to_sparql_xml() {
+                Ok(term) => term,
+                Err(error) => return invalid_typed_result(error.to_string()),
+            };
+            xml.push_str(&format!(
+                "      <binding name=\"{}\">{term}</binding>\n",
+                super::admin_handlers::xml_escape(key)
+            ));
         }
         xml.push_str("    </result>\n");
     }
@@ -582,6 +505,41 @@ pub(crate) fn format_select_xml(results: &[serde_json::Value]) -> Response {
                 StatusCode::INTERNAL_SERVER_ERROR,
             )
         })
+}
+
+fn typed_select_rows(
+    results: &[serde_json::Value],
+) -> Result<(Vec<String>, Vec<ResultBindingRow>), String> {
+    let vars = results
+        .first()
+        .and_then(serde_json::Value::as_object)
+        .map(|object| object.keys().cloned().collect())
+        .unwrap_or_default();
+    let rows = results
+        .iter()
+        .map(ResultBindingRow::from_json)
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|error| error.to_string())?;
+    Ok((vars, rows))
+}
+
+fn typed_row_json(row: &ResultBindingRow, vars: &[String]) -> serde_json::Value {
+    let mut binding = serde_json::Map::new();
+    for variable in vars {
+        if let Some(Some(value)) = row.value(variable) {
+            binding.insert(variable.clone(), value.to_json());
+        }
+    }
+    serde_json::Value::Object(binding)
+}
+
+fn invalid_typed_result(error: String) -> Response {
+    tracing::error!(%error, "invalid typed SPARQL result row");
+    redacted_error(
+        "invalid_sparql_result",
+        &error,
+        StatusCode::INTERNAL_SERVER_ERROR,
+    )
 }
 
 pub(crate) fn format_select_csv(results: &[serde_json::Value]) -> Response {
@@ -792,42 +750,51 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn format_select_json_classifies_bare_http_iri_as_uri() {
-        let row = json!({ "s": "http://example.org/foo" });
+    async fn format_select_json_preserves_typed_iris_for_any_scheme() {
+        let row = json!({
+            "http": {"type": "uri", "value": "http://example.org/foo"},
+            "urn": {"type": "uri", "value": "urn:isbn:9780134685991"},
+            "mail": {"type": "uri", "value": "mailto:alice@example.com"}
+        });
         let body = body_json(format_select_json(&[row])).await;
-        let binding = &body["results"]["bindings"][0]["s"];
-        assert_eq!(binding["type"], "uri");
-        assert_eq!(binding["value"], "http://example.org/foo");
+        let binding = &body["results"]["bindings"][0];
+        assert_eq!(binding["http"]["type"], "uri");
+        assert_eq!(binding["urn"]["value"], "urn:isbn:9780134685991");
+        assert_eq!(binding["mail"]["value"], "mailto:alice@example.com");
     }
 
     #[tokio::test]
-    async fn format_select_json_unwraps_angle_bracketed_iri() {
-        // pg_ripple's N-Triples serialisation wraps IRIs in `<...>`. The
-        // previous implementation classified these as `type: "literal"`
-        // because the value did not start with `http://`. This test pins the
-        // new behaviour.
-        let row = json!({ "s": "<http://example.org/foo>" });
+    async fn format_select_json_preserves_language_and_datatype() {
+        let row = json!({
+            "name": {"type": "literal", "value": "Alice", "xml:lang": "en"},
+            "age": {
+                "type": "literal",
+                "value": "42",
+                "datatype": "http://www.w3.org/2001/XMLSchema#integer"
+            }
+        });
         let body = body_json(format_select_json(&[row])).await;
-        let binding = &body["results"]["bindings"][0]["s"];
+        let binding = &body["results"]["bindings"][0];
+        assert_eq!(binding["name"]["value"], "Alice");
+        assert_eq!(binding["name"]["xml:lang"], "en");
         assert_eq!(
-            binding["type"], "uri",
-            "angle-bracketed IRI must be classified as uri, not literal"
+            binding["age"]["datatype"],
+            "http://www.w3.org/2001/XMLSchema#integer"
         );
-        assert_eq!(binding["value"], "http://example.org/foo");
     }
 
     #[tokio::test]
-    async fn format_select_json_preserves_plain_literals() {
-        let row = json!({ "name": "\"Alice\"@en" });
-        let body = body_json(format_select_json(&[row])).await;
-        let binding = &body["results"]["bindings"][0]["name"];
-        assert_eq!(binding["type"], "literal");
-        assert_eq!(binding["value"], "\"Alice\"@en");
+    async fn format_select_json_rejects_flattened_term_strings() {
+        let row = json!({ "s": "<http://example.org/foo>" });
+        assert_eq!(
+            format_select_json(&[row]).status(),
+            StatusCode::INTERNAL_SERVER_ERROR
+        );
     }
 
     #[tokio::test]
-    async fn format_select_json_classifies_blank_node() {
-        let row = json!({ "b": "_:abc123" });
+    async fn format_select_json_preserves_typed_blank_node() {
+        let row = json!({ "b": {"type": "bnode", "value": "abc123"} });
         let body = body_json(format_select_json(&[row])).await;
         let binding = &body["results"]["bindings"][0]["b"];
         assert_eq!(binding["type"], "bnode");
@@ -835,21 +802,30 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn format_select_xml_unwraps_angle_bracketed_iri() {
-        let row = json!({ "s": "<http://example.org/foo>" });
+    async fn format_select_xml_serializes_all_typed_term_metadata() {
+        let row = json!({
+            "iri": {"type": "uri", "value": "urn:example:item"},
+            "name": {"type": "literal", "value": "Alice & Bob", "xml:lang": "en"},
+            "age": {
+                "type": "literal",
+                "value": "42",
+                "datatype": "http://www.w3.org/2001/XMLSchema#integer"
+            }
+        });
         let resp = format_select_xml(&[row]);
         assert_eq!(resp.status(), StatusCode::OK);
         let bytes = to_bytes(resp.into_body(), 64 * 1024).await.unwrap();
         let body = std::str::from_utf8(&bytes).unwrap();
-        // The wrapped IRI is emitted as <uri>...</uri>, with the brackets
-        // stripped from the value, not as <literal>...</literal>.
+        assert!(body.contains("<uri>urn:example:item</uri>"), "got: {body}");
         assert!(
-            body.contains("<uri>http://example.org/foo</uri>"),
-            "expected <uri>…</uri>, got: {body}"
+            body.contains("<literal xml:lang=\"en\">Alice &amp; Bob</literal>"),
+            "got: {body}"
         );
         assert!(
-            !body.contains("<literal>&lt;http://example.org/foo&gt;</literal>"),
-            "should not be wrapped in <literal>: {body}"
+            body.contains(
+                "<literal datatype=\"http://www.w3.org/2001/XMLSchema#integer\">42</literal>"
+            ),
+            "got: {body}"
         );
     }
 }
