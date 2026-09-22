@@ -1,10 +1,10 @@
-# Cookbook：以知识图为依据的聊天机器人
+# Cookbook：基于知识图谱的聊天机器人
 
-**目标。** 构建一个 LLM 驱动的问答助手，使用**您的知识图**作为真实来源，而不是 LLM 的训练数据。幻觉急剧下降；每个答案都可以追溯到真实的三元组。
+**目标。** 构建一个由 LLM 驱动的问答助手，它使用**您的知识图谱**作为事实来源，而不是 LLM 的训练数据。幻觉大幅减少；每个答案都可以追溯到真实的三元组。
 
-**为什么使用 pg_ripple。** 一次 SQL 函数调用（`rag_context()`）返回一个 LLM 就绪的提示，融合向量召回、图扩展和（可选的）已执行 SPARQL。无需同步的向量存储，无需部署编排框架。
+**为什么选择 pg_ripple。** 一个 SQL 函数调用（`rag_context()`）返回一个 LLM 就绪的提示，融合了向量召回、图扩展和（可选的）已执行的 SPARQL。无需保持同步的向量存储，无需部署编排框架。
 
-**首次结果时间。** 约 10 分钟。
+**核心结果的时间。** ~10 分钟。
 
 ---
 
@@ -14,29 +14,29 @@
    用户问题                                   LLM 响应
         │                                                ▲
         ▼                                                │
-  ┌─────────────────────────────────────────────────────┴───────┐
-  │  应用程序代码（Python / TS / Go）                           │
-  │      ┌─────────────────────────────────────────────────┐   │
-  │      │  context = pg_ripple.rag_context(question, k=8) │   │
-  │      │  prompt  = SYSTEM_PROMPT + context + question   │   │
-  │      │  answer  = openai.chat(prompt)                  │   │
-  │      └─────────────────────────────────────────────────┘   │
-  └─────────────────────────────────────────────────────────────┘
+   ┌─────────────────────────────────────────────────────┴───────┐
+   │  应用程序代码 (Python / TS / Go)                              │
+   │      ┌─────────────────────────────────────────────────┐    │
+   │      │  context = pg_ripple.rag_context(question, k=8) │    │
+   │      │  prompt  = SYSTEM_PROMPT + context + question   │    │
+   │      │  answer  = openai.chat(prompt)                  │    │
+   │      └─────────────────────────────────────────────────┘    │
+   └─────────────────────────────────────────────────────────────┘
                                                             ▲
                                                             │
                                                        LLM API
 ```
 
-`rag_context()` 在单个 PostgreSQL 事务中执行每个 RAG 管道都必须做的四件事：
+`rag_context()` 在一个 PostgreSQL 事务中完成每个 RAG 管道必须做的四件事：
 
-1. 嵌入用户问题（对您的嵌入端点的 HTTP 调用）。
-2. HNSW 余弦搜索以检索前 *k* 个匹配实体。
+1. 嵌入用户问题（HTTP 调用到您的嵌入端点）。
+2. HNSW 余弦搜索以检索 top-*k* 匹配实体。
 3. SPARQL 图扩展以收集每个实体的 1 跳邻域。
 4. 将上下文组装为 JSON-LD 或纯文本。
 
 ---
 
-## 第 1 步 — 配置 LLM 和嵌入端点
+## 第 1 步 —— 配置 LLM 和嵌入端点
 
 ```sql
 ALTER SYSTEM SET pg_ripple.embedding_api_url     = 'https://api.openai.com/v1';
@@ -50,25 +50,25 @@ ALTER SYSTEM SET pg_ripple.llm_model             = 'gpt-4o';
 SELECT pg_reload_conf();
 ```
 
-API 密钥在调用时从环境变量中读取，永远不会存储在数据库中。
+API 密钥在调用时从环境变量读取，永远不会存储在数据库中。
 
-## 第 2 步 — 加载并嵌入您的知识图
+## 第 2 步 —— 加载并嵌入您的知识图谱
 
 ```sql
--- 加载您拥有的任何内容。可以是 Turtle 文件、R2RML 映射、GraphRAG 输出…
+-- 加载您拥有的任何内容。可以是 Turtle 文件、R2RML 映射、GraphRAG 输出、...
 SELECT pg_ripple.load_turtle_file('/data/medical_kb.ttl');
 
--- （推荐）具体化 OWL RL 推理，以便 'subClassOf' 链可见。
+-- （推荐）实现 OWL RL 推理，以便 'subClassOf' 链可见。
 SELECT pg_ripple.load_rules_builtin('owl-rl');
 SELECT pg_ripple.infer('owl-rl');
 
--- 嵌入每个有标签的实体。每次大加载后运行一次。
+-- 嵌入每个标记实体。在每次大加载后运行一次。
 SELECT pg_ripple.embed_entities();
 ```
 
-对于非常大的图，设置 `pg_ripple.use_graph_context = on`，使每个实体的嵌入输入包括其 1 跳邻居 — 对于标签本身不明确的实体的召回率显著提高。
+对于非常大的图，设置 `pg_ripple.use_graph_context = on`，以便每个实体的嵌入输入包括其 1 跳邻域 —— 对于标签本身模糊的实体，召回率显著提高。
 
-## 第 3 步 — 为问题检索上下文
+## 第 3 步 —— 检索问题的上下文
 
 ```sql
 SELECT pg_ripple.rag_context(
@@ -77,7 +77,7 @@ SELECT pg_ripple.rag_context(
 );
 ```
 
-返回一个 TEXT 块，准备放入提示中：
+返回一个单一的 TEXT 块，准备好放入提示中：
 
 ```
 You are answering using the following knowledge graph context:
@@ -93,9 +93,9 @@ ENTITY: <https://example.org/amlodipine>
   ...
 ```
 
-## 第 4 步 — 与 NL→SPARQL 组合以获得事实式答案
+## 第 4 步 —— 与 NL→SPARQL 结合用于事实型答案
 
-对于答案是小的、明确定义的集合（"how many"、"list the"、"who is"）的问题，让 LLM 还生成一个 SPARQL 查询来提取精确的答案：
+对于答案是小的、明确定义的集合的问题（"多少"、"列出"、"谁是"），让 LLM 还生成一个 SPARQL 查询来提取精确答案：
 
 ```sql
 SELECT pg_ripple.sparql_from_nl(
@@ -111,9 +111,9 @@ SELECT * FROM pg_ripple.sparql(
 );
 ```
 
-当设置 `pg_ripple.llm_endpoint` 时，`rag_context()` 自动执行此操作：组装的上下文包括向量检索的邻域**和**自动生成的 SPARQL 查询的结果行。
+当设置了 `pg_ripple.llm_endpoint` 时，`rag_context()` 会自动执行此操作：组装的上下文既包括向量检索的邻域，也包括自动生成的 SPARQL 查询的结果行。
 
-## 第 5 步 — 接入到您的应用程序
+## 第 5 步 —— 将其连接到您的应用程序
 
 ```python
 import psycopg
@@ -142,23 +142,23 @@ def answer(question: str) -> str:
 
 ---
 
-## 调整
+## 调优
 
 | 杠杆 | 作用 | 何时更改 |
 |---|---|---|
-| `k`（rag_context）| 包括的实体数 | 实际更多实体 = 更丰富的上下文，更多 token |
+| `k`（rag_context） | 包括的实体数 | 更多实体 = 更丰富的上下文，更多令牌 |
 | `pg_ripple.use_graph_context` | 使用邻域嵌入实体 | 改善模糊标签的召回率 |
-| `pg_ripple.llm_include_shapes` | 在 NL→SPARQL 提示中包括 SHACL 形状 | 在具有许多谓词的谓词上提高查询准确性 |
-| Few-shot 示例 | 通过 `pg_ripple.add_llm_example()` 添加 | 领域特定词汇表需要 5–10 个示例 |
+| `pg_ripple.llm_include_shapes` | 在 NL→SPARQL 提示中包括 SHACL 形状 | 在具有许多谓词的 schema 上改善查询准确性 |
+| 少样本示例 | 通过 `pg_ripple.add_llm_example()` 添加 | 领域特定词汇需要 5–10 个示例 |
 
 ---
 
-## 为什么这优于单独的向量数据库
+## 为什么这胜过单独的向量数据库
 
-- **一个事务。** 加载新三元组和更新嵌入是原子发生的。崩溃后没有半更新的向量存储。
-- **无漂移。** 单独的向量数据库有自己的模式；几个月后，两者发生分歧。这里有一个模式，一个真实来源。
-- **默认多租户。** 应用 [graph RLS](../features/multi-tenant-graphs.md)，相同的 `rag_context()` 调用返回租户范围的上下文，无需应用级过滤。
-- **审计就绪。** 启用 [`audit_log_enabled`](../reference/audit-log.md)，每个 RAG 时间 UPDATE 都被捕获。单独的向量数据库无法做到这一点。
+- **一个事务。** 加载新三元组和更新嵌入以原子方式发生。崩溃后没有半更新的向量存储。
+- **无偏移。** 单独的向量数据库有自己的 schema；经过几个月，两者会发散。这里有一个 schema，一个事实来源。
+- **默认多租户。** 应用 [graph RLS](../features/multi-tenant-graphs.md)，相同的 `rag_context()` 调用返回租户范围的上下文，无需应用程序级过滤器。
+- **审计就绪。** 启用 [`audit_log_enabled`](../reference/audit-log.md)，每次 RAG 时的 UPDATE 都会被捕获。单独的向量数据库无法做到这一点。
 
 ---
 

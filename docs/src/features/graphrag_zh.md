@@ -1,41 +1,41 @@
 # GraphRAG 端到端
 
-[Microsoft GraphRAG](https://github.com/microsoft/graphrag) 是一个流行的开源管道，可将非结构化文档转换为实体、关系、文本单元和社区摘要的结构化知识图。pg_ripple 是 GraphRAG 的**一流存储和查询后端**：您可以直接引入 GraphRAG 输出、使用 Datalog 规则丰富它、使用 SHACL 验证它，并将其导出回 Parquet 以供下游工具使用 — 所有这些都无需离开 PostgreSQL。
+[Microsoft GraphRAG](https://github.com/microsoft/graphrag) 是一个流行的开源管道，可将非结构化文档转换为实体、关系、文本单元和社区摘要的结构化知识图谱。pg_ripple 是 GraphRAG 的**一流存储和查询后端**：您可以直接导入 GraphRAG 输出，使用 Datalog 规则丰富它，使用 SHACL 验证它，并将其作为 Parquet 导出回下游工具 —— 所有这些都无需离开 PostgreSQL。
 
-此页面是规范的端到端指南。它假定您已经有了有效的 GraphRAG 输出（标准的 `entities.parquet`、`relationships.parquet`、`text_units.parquet` 文件）。
+此页面是规范的端到端指南。它假定您已有可用的 GraphRAG 输出（标准的 `entities.parquet`、`relationships.parquet`、`text_units.parquet` 文件）。
 
 ---
 
-## pg_ripple 为 GraphRAG 添加了什么
+## pg_ripple 为 GraphRPG 添加了什么
 
 | 库存 GraphRAG | 使用 pg_ripple |
 |---|---|
-| 输出以 Parquet 存储在磁盘上 | 输出以可查询的 RDF 形式存储 |
-| 通过自定义 Python 管道搜索 | 通过 SPARQL、SHACL、向量 + RAG 搜索 |
-| 没有增量更新 — 重建整个图 | 增量：将新文档加载到命名图并重新推理 |
-| 质量问题仅在查询时出现 | SHACL 在插入时捕获缺失标签、悬挂关系等 |
-| 一个进程拥有数据 | 多个读取者、事务写入者、完整 ACID |
+| 输出以 Parquet 形式存储在磁盘上 | 输出以可查询 RDF 形式存储在 PostgreSQL 中 |
+| 通过自定义 Python 管道进行搜索 | 通过 SPARQL、SHACL、向量 + RAG 进行搜索 |
+| 无增量更新 —— 重建整个图 | 增量：将新文档加载到命名图中并重新推理 |
+| 质量问题仅在查询时出现 | SHACL 在插入时捕获缺失标签、悬空关系等 |
+| 一个进程拥有数据 | 多个读取器、事务性写入器、完整 ACID |
 
 ---
 
 ## 数据模型
 
-GraphRAG 被映射到四个 RDF 类：
+GraphRAG 映射到四个 RDF 类：
 
-| 类 | 它表示什么 |
+| 类 | 它表示的内容 |
 |---|---|
-| `gr:Entity` | 命名实体（人、组织、位置、事件）|
+| `gr:Entity` | 命名实体（人员、组织、地点、事件……） |
 | `gr:Relationship` | 两个实体之间的有向加权边 |
-| `gr:TextUnit` | 提及实体的源文本块 |
-| `gr:Community` | 检测到的相关实体集群 |
+| `gr:TextUnit` | 提到实体的源文本块 |
+| `gr:Community` | 相关实体的检测到集群 |
 | `gr:CommunityReport` | 社区的 LLM 生成摘要 |
 
-主要属性：
+关键属性：
 
 | 属性 | 域 | 范围 |
 |---|---|---|
 | `gr:title` | `gr:Entity` | `xsd:string` |
-| `gr:type` | `gr:Entity` | `xsd:string`（PERSON、ORG 等）|
+| `gr:type` | `gr:Entity` | `xsd:string`（PERSON、ORG……） |
 | `gr:description` | 任何 | `xsd:string` |
 | `gr:source` | `gr:Relationship` | `gr:Entity` |
 | `gr:target` | `gr:Relationship` | `gr:Entity` |
@@ -43,7 +43,7 @@ GraphRAG 被映射到四个 RDF 类：
 | `gr:text` | `gr:TextUnit` | `xsd:string` |
 | `gr:tokenCount` | `gr:TextUnit` | `xsd:integer` |
 
-完整的本体（包括所有 SHACL 形状）位于 `examples/graphrag_byog.sql`。
+包括所有 SHACL 形状在内的完整本体位于 `examples/graphrag_byog.sql`。
 
 ---
 
@@ -54,7 +54,7 @@ GraphRAG 被映射到四个 RDF 类：
             │
             ▼
    entities.parquet                    │
-   relationships.parquet               │  第 1 步：导入
+   relationships.parquet               │  步骤 1：导入
    text_units.parquet                  │
             │                          │
             ▼                          │
@@ -62,26 +62,26 @@ GraphRAG 被映射到四个 RDF 类：
    ──────────────────────────────────────────
             │
             ▼
-   第 2 步：使用 Datalog 丰富
+   步骤 2：使用 Datalog 丰富
    pg_ripple.load_rules_builtin('graphrag-enrichment')
    pg_ripple.infer('graphrag-enrichment')
    → 派生 gr:coworker、gr:collaborates、
      gr:indirectReport、gr:relatedOrg
             │
             ▼
-   第 3 步：使用 SHACL 验证
+   步骤 3：使用 SHACL 验证
    pg_ripple.load_shacl(...)
    pg_ripple.shacl_validate()
-   → 捕获缺失标签、悬挂引用
+   → 捕获缺失标签、悬空引用
             │
             ▼
-   第 4 步：查询
+   步骤 4：查询
    - SPARQL 用于关系遍历
-   - rag_context() 用于基于地面的 LLM 提示
+   - rag_context() 用于基础 LLM 提示
    - hybrid_search() 用于相似性 + 结构
             │
             ▼
-   第 5 步（可选）：导出回 Parquet
+   步骤 5（可选）：导出回 Parquet
    pg_ripple.export_graphrag_entities()
    pg_ripple.export_graphrag_relationships()
    → 用于下游 Microsoft GraphRAG 工具
@@ -89,10 +89,10 @@ GraphRAG 被映射到四个 RDF 类：
 
 ---
 
-## 第 1 步 — 导入 GraphRAG 输出
+## 步骤 1 —— 导入 GraphRAG 输出
 
 ```sql
--- 一次注册 gr: 前缀。
+-- 注册 gr: 前缀一次。
 SELECT pg_ripple.register_prefix('gr', 'https://graphrag.org/ns/');
 
 -- 导入三个核心文件。每个文件成为命名图中的三元组。
@@ -121,30 +121,30 @@ $TTL$);
 
 ---
 
-## 第 2 步 — 使用 Datalog 丰富
+## 步骤 2 —— 使用 Datalog 丰富
 
 捆绑的 `graphrag-enrichment` 规则集从原始 GraphRAG 输出派生四个有用的关系：
 
 | 派生属性 | 含义 |
 |---|---|
-| `gr:coworker` | 两个实体都有以同一组织为目标的关系 |
+| `gr:coworker` | 两个实体都有针对同一组织的关系 |
 | `gr:collaborates` | 两个实体在同一文本单元中共现 |
 | `gr:indirectReport` | `gr:manages` 的传递闭包 |
-| `gr:relatedOrg` | 两个组织共享实体桥 |
+| `gr:relatedOrg` | 两个组织共享一个实体桥梁 |
 
 ```sql
 SELECT pg_ripple.load_rules_builtin('graphrag-enrichment');
 SELECT pg_ripple.infer('graphrag-enrichment');
--- 返回派生三元组（source = 1）的数量。
+-- 返回派生三元组的计数（source = 1）。
 ```
 
-您可以编写自己的规则 — 请参阅[推理和推理](reasoning-and-inference.md) — 但捆绑的规则集是一个很好的起点。
+您可以编写自己的规则 —— 请参阅[推理与演绎](reasoning-and-inference.md) —— 但捆绑集是一个很好的起点。
 
 ---
 
-## 第 3 步 — 使用 SHACL 验证
+## 步骤 3 —— 使用 SHACL 验证
 
-GraphRAG 输出由 LLM 生成，可能存在质量问题：没有标题的实体、指向已删除实体的关系、权重超出 [0, 1]。使用 SHACL 捕获它们：
+GraphRAG 输出是由 LLM 生成的，可能存在质量问题：没有标题的实体、指向已删除实体的关系、[0, 1] 之外的权重。使用 SHACL 捕获它们：
 
 ```sql
 SELECT pg_ripple.load_shacl($TTL$
@@ -164,17 +164,17 @@ gr:RelationshipShape a sh:NodeShape ;
     sh:property [ sh:path gr:weight ; sh:datatype xsd:float ] .
 $TTL$);
 
--- 验证当前存储中的所有内容。
+-- 验证存储中当前的所有内容。
 SELECT focus_node, message FROM pg_ripple.shacl_validate();
 ```
 
-设置 `pg_ripple.shacl_mode = 'sync'` 在写入时拒绝违规插入，或 `'async'` 将它们路由到死信队列。请参阅[验证数据质量](validating-data-quality.md)。
+设置 `pg_ripple.shacl_mode = 'sync'` 以在写入时拒绝违规插入，或设置 `'async'` 以将它们路由到死信队列。请参阅[验证数据质量](validating-data-quality.md)。
 
 ---
 
-## 第 4 步 — 查询丰富的图
+## 步骤 4 —— 查询丰富的图
 
-特定于 GraphRAG 的查询自然地与 `rag_context()` 配对：
+GraphRAG 特定查询与 `rag_context()` 自然搭配：
 
 ```sql
 -- 查找问题的 LLM 就绪上下文。
@@ -187,7 +187,7 @@ SELECT pg_ripple.rag_context(
 对于纯粹的结构查询，直接使用 SPARQL：
 
 ```sql
--- Alice 的同事的同事的所有人（2 跳搜索）。
+-- Alice 同事的所有同事（2 跳搜索）。
 SELECT * FROM pg_ripple.sparql($$
     PREFIX gr: <https://graphrag.org/ns/>
     SELECT DISTINCT ?friend WHERE {
@@ -199,33 +199,33 @@ $$);
 
 ---
 
-## 第 5 步 — 往返导出
+## 步骤 5 —— 往返导出
 
-如果需要将丰富的图反馈到 Microsoft GraphRAG 的 Python 工具中：
+如果您需要将富化的图反馈给 Microsoft GraphRAG 的 Python 工具：
 
 ```sql
 SELECT pg_ripple.export_graphrag_entities('', '/tmp/entities.parquet');
 SELECT pg_ripple.export_graphrag_relationships('', '/tmp/relationships.parquet');
 ```
 
-为默认图传递 `''` 或命名图 IRI 以限定导出范围。
+为默认图传递 `''`，或为命名图 IRI 传递以确定导出范围。
 
 ---
 
 ## 操作提示
 
-- **每次引入运行使用一个命名图**（`https://example.org/kb-2026-04`）。当重新引入运行时，`clear_graph()` 会原子地删除旧版本。
-- **在加载*之后*运行推理，**而不是交错运行。推理是批量友好的并且可并行化；按行推理不行。
-- **在丰富之后实现嵌入。** Datalog 派生的属性提高了 KGE 质量和 `rag_context()` 召回率。
+- **每个摄取运行使用一个命名图**（`https://example.org/kb-2026-04`）。当重新摄取运行时，`clear_graph()` 以原子方式删除旧版本。
+- **在加载之后运行推理**，而不是交错进行。推理对批处理友好且可并行化；按行推理则不然。
+- **在丰富之后物化嵌入。** Datalog 派生属性改善 KGE 质量和 `rag_context()` 召回率。
 
 ---
 
 ## 另请参阅
 
 - [AI 概述](ai-overview.md)
-- [推理和推理](reasoning-and-inference.md)
+- [推理与演绎](reasoning-and-inference.md)
 - [验证数据质量](validating-data-quality.md)
-- [Cookbook：基于知识图的聊天机器人](../cookbook/grounded-chatbot.md)
+- [Cookbook：基于知识图谱的聊天机器人](../cookbook/grounded-chatbot.md)
 - [GraphRAG 函数参考](../reference/graphrag-functions.md)
 - [GraphRAG 本体参考](../reference/graphrag-ontology.md)
 

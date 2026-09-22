@@ -1,32 +1,32 @@
-# Cookbook：从关系目录生成知识图
+# Cookbook：从关系目录构建知识图谱
 
-**目标。** 您有一个有效的 PostgreSQL 模式，例如用于产品目录。您希望一个可查询的 RDF 图与该模式**保持同步**，验证输出，并允许分析人员用 SPARQL 回答关系问题。
+**目标。** 您有一个用于产品目录的工作 PostgreSQL schema。您希望获得一个可查询的 RDF 图，它与该 schema **保持同步**，验证输出，并允许分析师在 SPARQL 中回答关系问题。
 
-**为什么使用 pg_ripple。** 两种模式存在于同一个数据库中。没有 ETL 作业，没有最终一致性，单个 SHACL 合约保护输出。
+**为什么选择 pg_ripple。** 两个 schema 位于同一数据库中。没有 ETL 作业，没有最终一致性，一个 SHACL 契约保护输出。
 
-**首次结果时间。** 约 15 分钟。
+**第一次结果的时间。** ~15 分钟。
 
 ---
 
 ## 您构建的内容
 
 ```
-   关系表                          RDF 三元组                    SPARQL 客户端
-   ─────────────────              ───────────                    ──────────────
-   product (id, name, …)  ──┐     <…/product/42> a Product
-   category (id, parent_id)─┼──►  <…/product/42> in <…/category/7>      ──►  pg_ripple.sparql(...)
-   inventory (sku, qty)  ──┘     <…/product/42> sku "WIDGET-1"              "在玩具层次结构中
-                                    <…/category/7> parent <…/category/3>        所有缺货的库存"
+   关系表                 RDF 三元组                SPARQL 客户端
+   ──────────                 ───────────                ──────────────
+   product (id, name, …)   ──┐      <…/product/42> a Product
+   category (id, parent_id) ──┼──►  <…/product/42> in <…/category/7>      ──►  pg_ripple.sparql(...)
+   inventory (sku, qty)    ──┘      <…/product/42> sku "WIDGET-1"              "玩具层次结构中的所有
+                                    <…/category/7> parent <…/category/3>        缺货产品"
                                     …
                                               ▲
-                                          │
-                                  SHACL 验证
-                                  在每次加载时触发
+                                              │
+                                       SHACL 验证
+                                       在每次加载时触发
 ```
 
 ---
 
-## 第 1 步 — 关系源
+## 第 1 步 —— 关系源
 
 ```sql
 CREATE TABLE category (
@@ -49,9 +49,9 @@ CREATE TABLE inventory (
 );
 ```
 
-用几行填充它；该食谱不关心数据。
+用几行填充它；此配方不关心数据。
 
-## 第 2 步 — 定义 R2RML 映射
+## 第 2 步 —— 定义 R2RML 映射
 
 ```sql
 SELECT pg_ripple.r2rml_load($TTL$
@@ -91,9 +91,9 @@ SELECT pg_ripple.r2rml_load($TTL$
 $TTL$);
 ```
 
-## 第 3 步 — 定义 SHACL 合约
+## 第 3 步 —— 定义 SHACL 契约
 
-这是该食谱中最被低估的技巧。形状编码输出的*预期形状*。如果源模式发生偏差（列被重命名、外键被删除），SHACL 运行会立即标记。
+这是此配方中最被低估的技巧。形状编码输出的*预期形状*。如果源 schema 发生偏移（列被重命名、外键被删除），SHACL 运行会立即标记它。
 
 ```sql
 SELECT pg_ripple.load_shacl($TTL$
@@ -115,9 +115,9 @@ ALTER SYSTEM SET pg_ripple.shacl_mode = 'sync';
 SELECT pg_reload_conf();
 ```
 
-## 第 4 步 — 增量重新运行
+## 第 4 步 —— 增量重新运行
 
-安排 R2RML 加载在每个关系 ETL 传递之后运行。因为字典 ID 是确定性的，重复加载是幂等的 — 只有更改的行才会生成新的三元组。
+安排 R2RML 加载在每次关系 ETL 传递后运行。因为字典 ID 是确定性的，重复加载是幂等的 —— 只有更改的行才会生成新的三元组。
 
 ```sql
 -- Cron 作业，每分钟一次：
@@ -125,9 +125,9 @@ SELECT pg_ripple.r2rml_reload();   -- 简写：重新运行最近的 r2rml_load(
 SELECT * FROM pg_ripple.shacl_validate() LIMIT 10;
 ```
 
-如果 `shacl_validate()` 返回行，则关系源已发生偏差，并触发警报。
+如果 `shacl_validate()` 返回行，则关系源已发生偏移，并触发警报。
 
-## 第 5 步 — 在 SPARQL 中查询
+## 第 5 步 —— 在 SPARQL 中查询
 
 ```sql
 SELECT * FROM pg_ripple.sparql($$
@@ -146,15 +146,15 @@ SELECT * FROM pg_ripple.sparql($$
 $$);
 ```
 
-`skos:broader*` 属性路径以无递归深度上限遍历类别层次结构。尝试用纯 SQL 表达，您将重新发现图查询存在的原因。
+`skos:broader*` 属性路径在类别层次上展开，没有递归深度上限。尝试用纯 SQL 表达它，您将重新发现为什么存在图查询。
 
 ---
 
 ## 变体
 
-- **多源。** 为每个映射添加 `rr:graphMap`，以便三元组进入每个源的命名图（`https://example.org/source/postgres-prod`）。然后[多租户图](../features/multi-tenant-graphs.md)为您提供每源 RLS。
-- **软删除。** 用过滤掉 `deleted_at IS NOT NULL` 的 `rr:sqlQuery` 替换 `rr:tableName`。重新运行将*删除*相应的三元组。
-- **外部数据包装器。** `rr:tableName` 接受外部表，因此您可以在不复制数据的情况下提取远程 PostgreSQL 或 MySQL 模式。
+- **多源。** 向每个映射添加 `rr:graphMap`，使三元组落入每个源的命名图（`https://example.org/source/postgres-prod`）。然后[多租户图](../features/multi-tenant-graphs.md)为您提供每个源的 RLS。
+- **软删除。** 将 `rr:tableName` 替换为过滤掉 `deleted_at IS NOT NULL` 的 `rr:sqlQuery`。重新运行将*删除*相应的三元组。
+- **外部数据包装器。** `rr:tableName` 接受外部表，因此您可以摄取远程 PostgreSQL 或 MySQL schema 而无需复制数据。
 
 ---
 

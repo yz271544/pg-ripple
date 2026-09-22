@@ -1,10 +1,10 @@
 # Cookbook：SPARQL 修复工作流
 
-**目标。** 构建一个迭代循环，其中 LLM 提出 SPARQL 查询，pg_ripple 告诉它出了什么问题（解析错误、缺失前缀、无行、模式不匹配），然后 LLM 再试一次。大多数"无结果"案例在一两次迭代中会自行修复。
+**目标。** 构建一个迭代循环，让 LLM 提出 SPARQL 查询，pg_ripple 告诉它出了什么问题（解析错误、缺少前缀、没有行、schema 不匹配），然后 LLM 重试。大多数"无结果"的情况在一两次迭代中会自愈。
 
-**为什么使用 pg_ripple。** `sparql_from_nl()` 和 `explain_sparql()` 被设计为可组合的。将它们与[错误目录](../reference/error-catalog.md)结合使用，您将获得一个自动化的 SPARQL 配对程序员。
+**为什么选择 pg_ripple。** `sparql_from_nl()` 和 `explain_sparql()` 被设计为可组合的。将它们与[错误目录](../reference/error-catalog.md)结合，您就获得了一个自动化的 SPARQL 结对编程伙伴。
 
-**首次结果时间。** 约 10 分钟。
+**核心结果的时间。** ~10 分钟。
 
 ---
 
@@ -16,15 +16,15 @@
         ▼
    sparql_from_nl(question)
         │
-        ├── 解析失败（PT702）──► 描述错误 → LLM 重试
+        ├── 解析失败 (PT702) ──► 描述错误 → LLM 重试
         │
         ▼
    sparql(query)
         │
-        ├── 异常（PT…）       ──► 描述错误 → LLM 重试
+        ├── 异常 (PT…)        ──► 描述错误 → LLM 重试
         │
         ▼
-   行数 = 0 ？
+   row count == 0 ?
         │
         ├── 是 ──► explain_sparql(query, analyze:=true) → LLM 重试
         │
@@ -32,11 +32,11 @@
    答案
 ```
 
-最大迭代次数：3。比这更糟糕的通常是一个数据质量问题，应该上报给人工。
+最大迭代次数：3。比这更糟糕的情况通常是数据质量问题，应该升级到人工处理。
 
 ---
 
-## 第 1 步 — 配置 NL → SPARQL
+## 第 1 步 —— 配置 NL → SPARQL
 
 ```sql
 ALTER SYSTEM SET pg_ripple.llm_endpoint    = 'https://api.openai.com/v1';
@@ -46,9 +46,9 @@ ALTER SYSTEM SET pg_ripple.llm_include_shapes = on;
 SELECT pg_reload_conf();
 ```
 
-`llm_include_shapes = on` 将您的活动 SHACL 形状随每个提示一起发送 — LLM 看到模式并生成尊重它的查询。
+`llm_include_shapes = on` 将您活动的 SHACL 形状与每个提示一起发送 —— LLM 看到 schema 并生成尊重它的查询。
 
-## 第 2 步 — 为您的词汇表添加 few-shot 示例
+## 第 2 步 —— 为您的词汇添加少样本示例
 
 ```sql
 SELECT pg_ripple.add_llm_example(
@@ -60,9 +60,9 @@ SELECT pg_ripple.add_llm_example(
 );
 ```
 
-每个领域通常 5 到 10 个示例就足够了。
+每个领域 5 到 10 个示例通常就足够了。
 
-## 第 3 步 — 修复函数
+## 第 3 步 —— 修复函数
 
 ```sql
 CREATE OR REPLACE FUNCTION sparql_repair(question TEXT, max_attempts INT DEFAULT 3)
@@ -100,7 +100,7 @@ BEGIN
             CONTINUE;
         END;
 
-        -- 3. 如果为空，要求 LLM 放宽。
+        -- 3. 如果为空，请 LLM 放宽条件。
         IF row_count = 0 THEN
             attempt := n; query := q; status := 'empty_result_set'; rows := NULL;
             RETURN NEXT;
@@ -111,7 +111,7 @@ BEGIN
             CONTINUE;
         END IF;
 
-        -- 4. 
+        -- 4. 成功。
         attempt := n; query := q; status := 'ok'; rows := out_rows;
         RETURN NEXT;
         RETURN;
@@ -120,7 +120,7 @@ END;
 $$ LANGUAGE plpgsql;
 ```
 
-## 第 4 步 — 使用它
+## 第 4 步 —— 使用它
 
 ```sql
 SELECT * FROM sparql_repair('Which proteins interact with the gene encoding insulin?');
@@ -136,24 +136,24 @@ attempt | query                                           | status              
 3       | PREFIX bio: <https://bio.example/> SELECT ...   | ok                     | [...]
 ```
 
-三次尝试，自动化。用户获得正确答案；审计日志捕获每个尝试的查询以供稍后分析。
+三次尝试，自动完成。用户得到正确答案；审计日志捕获每个尝试的查询以供后续分析。
 
 ---
 
 ## 遥测
 
-将 `sparql_repair()` 接入到您的应用程序遥测中：
+将 `sparql_repair()` 连接到您的应用程序遥测：
 
-- **每个问题的平均尝试次数** — > 2 意味着您需要更多 few-shot 示例。
-- **最常见的错误代码** — 可能是词汇表差距。
-- **重试深度** — > 3 意味着 LLM 在原地打转；上报给人工。
+- **每个问题的平均尝试次数** — > 2 意味着您需要更多少样本示例。
+- **最常见的错误代码** — 可能是词汇差距。
+- **重试深度** — > 3 意味着 LLM 在兜圈子；升级到人工处理。
 
 ---
 
 ## 强化
 
-- **设置 `pg_ripple.sparql_max_algebra_depth`** 在执行之前拒绝病理生成的查询。
-- **设置 `pg_ripple.sparql_query_timeout`** 这样错误的生成无法卡住数据库。
+- **设置 `pg_ripple.sparql_max_algebra_depth`** 以在执行之前拒绝病态的生成查询。
+- **设置 `pg_ripple.sparql_query_timeout`** 以使错误的生成不能楔住数据库。
 - **缓存成功的（question → query）对** — LLM 不需要为重复调用。
 
 ---
@@ -161,5 +161,5 @@ attempt | query                                           | status              
 ## 另请参阅
 
 - [NL → SPARQL](../features/nl-to-sparql.md)
-- [SPARQL 查询调试器 — explain_sparql](../user-guide/explain-sparql.md)
+- [SPARQL 查询调试器 —— explain_sparql](../user-guide/explain-sparql.md)
 - [错误目录](../reference/error-catalog.md)

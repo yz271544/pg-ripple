@@ -1,12 +1,12 @@
 # 从 Neo4j 迁移到 pg_ripple
 
-本食谱介绍如何将 Neo4j 属性图迁移到 pg_ripple 的 RDF 三元组存储。您将导出 Neo4j 数据，将其转换为 RDF，加载到 pg_ripple 中，并验证迁移。
+本配方引导您将 Neo4j 属性图迁移到 pg_ripple 的 RDF 三元组存储。您将导出 Neo4j 数据，将其转换为 RDF，加载到 pg_ripple 中，并验证迁移。
 
 ## 先决条件
 
 - Neo4j 5.x（Community 或 Enterprise）
 - pg_ripple v0.90.0 或更高版本
-- Python 3.11+，并安装 `neo4j` 和 `rdflib` 包
+- Python 3.11+ 及 `neo4j` 和 `rdflib` 包
 
 ```bash
 pip install neo4j rdflib
@@ -97,7 +97,7 @@ for rel in rels:
     pred_uri = EX[rel["rel"].lower()]
     g.add((from_uri, pred_uri, to_uri))
 
-# 导出到 Turtle
+# 导出为 Turtle
 turtle_data = g.serialize(format="turtle")
 with open("/tmp/neo4j_export.ttl", "w") as f:
     f.write(turtle_data)
@@ -109,7 +109,7 @@ print(f"Exported {len(g)} triples to neo4j_export.ttl")
 ## 第 3 步：加载到 pg_ripple
 
 ```sql
--- 为迁移的数据创建命名图
+-- 为迁移的数据创建一个命名图
 SELECT pg_ripple.insert_triple(
   'https://example.org/neo4j_import',
   'rdf:type',
@@ -128,7 +128,7 @@ SELECT COUNT(*) FROM pg_ripple.sparql(
 );
 ```
 
-对于大型导出（数百万三元组），改用批量加载器：
+对于大型导出（数百万个三元组），请改用批量加载器：
 
 ```sql
 -- 通过 COPY 流式传输以获得最大吞吐量
@@ -152,7 +152,7 @@ RETURN p
 ```
 
 ```sparql
--- pg_ripple 等价物（属性路径）
+-- pg_ripple 等效（属性路径）
 SELECT ?path WHERE {
   <https://example.org/Alice> ex:knows+ <https://example.org/Bob> .
 }
@@ -184,18 +184,18 @@ SELECT ?coworkerName WHERE {
 
 ```turtle
 @prefix sh: <http://www.w3.org/ns/shacl#> .
-@prefix ex: <https://example.org/>
+@prefix ex: <https://example.org/> .
 
 ex:PersonShape a sh:NodeShape ;
   sh:targetClass ex:Person ;
   sh:property [
     sh:path ex:email ;
-    sh:maxCount 1 ;           -- Neo4j 唯一性约束的等价物
+    sh:maxCount 1 ;           -- Neo4j 唯一性约束等效
     sh:datatype xsd:string
   ] ;
   sh:property [
     sh:path ex:name ;
-    sh:minCount 1 ;           -- NOT NULL 的等价物
+    sh:minCount 1 ;           -- NOT NULL 等效
     sh:datatype xsd:string
   ] .
 ```
@@ -204,7 +204,7 @@ ex:PersonShape a sh:NodeShape ;
 SELECT pg_ripple.load_shacl($$
   @prefix sh: <http://www.w3.org/ns/shacl#> .
   @prefix ex: <https://example.org/> .
-  -- 在这里粘贴形状
+  -- 在此处粘贴形状
 $$);
 ```
 
@@ -225,7 +225,7 @@ FROM pg_ripple.sparql($$
   }
 $$);
 
--- 验证计数是否与 Neo4j 匹配
+-- 验证计数与 Neo4j 匹配
 SELECT binding->>'?count' AS triple_count
 FROM pg_ripple.sparql('SELECT (COUNT(*) AS ?count) WHERE { ?s ?p ?o }');
 ```
@@ -239,11 +239,11 @@ FROM pg_ripple.sparql('SELECT (COUNT(*) AS ?count) WHERE { ?s ?p ?o }');
 | 节点标签 | `rdf:type` 断言 |
 | 节点属性 | 谓词-对象对 |
 | 关系类型 | 谓词 IRI |
-| 关系属性 | RDF-star 引用三元组或具体化 |
+| 关系属性 | RDF-star 引用三元组或具名化 |
 | 节点 ID | IRI（推荐 UUID） |
-| 唯一约束 | `sh:maxCount 1` 形状 |
+| 唯一性约束 | `sh:maxCount 1` 形状 |
 | 存在性约束 | `sh:minCount 1` 形状 |
-| 属性索引 | VP 表自动索引 |
+| 属性上的索引 | VP 表自动索引 |
 | Cypher `MATCH` | SPARQL `SELECT … WHERE { }` |
 | Cypher `CREATE` | `pg_ripple.insert_triple()` |
 | Cypher `MERGE` | 通过批量加载的 `INSERT … ON CONFLICT DO NOTHING` |
@@ -254,7 +254,7 @@ FROM pg_ripple.sparql('SELECT (COUNT(*) AS ?count) WHERE { ?s ?p ?o }');
 
 ## 性能提示
 
-1. **批量加载**使用 `bulk_load_turtle_file()` 来避免每次调用的开销。
-2. **设置 `pg_ripple.vp_promotion_threshold = 100`** 在迁移期间为更多谓词创建单独的 VP 表，然后恢复默认值。
+1. **批量加载** 使用 `bulk_load_turtle_file()` 以避免单个插入的每次调用开销。
+2. **设置 `pg_ripple.vp_promotion_threshold = 100`** 在迁移期间为更多谓词创建单独的 VP 表，然后在之后恢复默认值。
 3. **运行 `VACUUM ANALYZE`** 在 `_pg_ripple.dictionary` 上进行大型加载后。
 4. **使用 `pg_ripple.run_merge()`** 在重型分析查询之前将增量刷新到主分区。

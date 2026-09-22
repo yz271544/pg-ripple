@@ -1,16 +1,16 @@
 # Cookbook：与 Wikidata 和 DBpedia 联邦
 
-**目标。** 在单个查询中组合来自本地知识图和公共 SPARQL 端点（Wikidata、DBpedia 或任何其他）的数据。无需 ETL，无需复制数据，无需定时同步。
+**目标。** 在单个查询中，将来自本地知识图谱的数据与来自公共 SPARQL 端点（Wikidata、DBpedia 或任何其他）的信息合并起来。无 ETL、无数据复制、无计划同步。
 
-**为什么使用 pg_ripple。** SPARQL 1.1 `SERVICE` 联邦是内置的。基于成本的规划器将过滤器下推到远程端点，断路器处理超时，处理时间缓存避免每次查询都命中远程端点。
+**为什么选择 pg_ripple。** SPARQL 1.1 `SERVICE` 联邦是内置的。基于成本的规划器将过滤器下推到远程端点，断路器处理超时，进程内缓存避免每次查询都命中远程端点。
 
-**首次结果时间。** 约 10 分钟。
+**核心结果的时间。** ~10 分钟。
 
 ---
 
-## 第 1 步 — 注册远程端点
+## 第 1 步 —— 注册远程端点
 
-注册一次端点可让规划器分配成本估算，并让健康监控器跟踪其可用性。
+注册一次端点可让规划器分配成本估算，并让健康监视器跟踪其可用性。
 
 ```sql
 SELECT pg_ripple.register_federation_endpoint(
@@ -26,9 +26,9 @@ SELECT pg_ripple.register_federation_endpoint(
 );
 ```
 
-未注册时，`SERVICE` 仍然有效，但获得通用成本估算且没有健康监控。
+如果不注册，`SERVICE` 仍然有效，但会获得通用成本估算且无健康监视。
 
-## 第 2 步 — 加载本地事实
+## 第 2 步 —— 加载本地事实
 
 ```sql
 SELECT pg_ripple.load_turtle($TTL$
@@ -44,11 +44,11 @@ ex:bob    owl:sameAs  dbr:Robert_Jones_(chemist) .
 $TTL$);
 ```
 
-`owl:sameAs` 链接告诉规划器您的本地实体对应于 DBpedia 资源。当 `pg_ripple.sameas_reasoning = on`（默认值）时，SERVICE 查询可以使用任一 IRI。
+`owl:sameAs` 链接告诉规划器您的本地实体对应于 DBpedia 资源。在 `pg_ripple.sameas_reasoning = on`（默认）的情况下，SERVICE 查询可以使用任一 IRI。
 
-## 第 3 步 — 一个简单的联邦查询
+## 第 3 步 —— 简单的联邦查询
 
-从 DBpedia 检索您本地人员的出生日期：
+从 DBpedia 检索您在本地拥有的人的出生日期：
 
 ```sql
 SELECT * FROM pg_ripple.sparql($$
@@ -69,11 +69,11 @@ SELECT * FROM pg_ripple.sparql($$
 $$);
 ```
 
-规划器将 `?remote dbo:birthDate ?birthDate` 发送到 DBpedia，其中 `?remote` 的值从本地结果绑定 — 这是 **bound-join 联邦**，是最有效的模式。
+规划器将 `?remote dbo:birthDate ?birthDate` 与从本地结果绑定的 `?remote` 值一起发送到 DBpedia —— 这是**绑定连接联邦**，最高效的模式。
 
-## 第 4 步 — 多源富化
+## 第 4 步 —— 多源丰富
 
-用 Wikidata（药物适应症）和本地专有存储（临床试验数据）富化医学图：
+使用 Wikidata（药物适应症）和本地专有存储（临床试验数据）来丰富医学图：
 
 ```sql
 SELECT * FROM pg_ripple.sparql($$
@@ -90,7 +90,7 @@ SELECT * FROM pg_ripple.sparql($$
         -- Wikidata：批准的适应症。
         SERVICE <https://query.wikidata.org/sparql> {
             ?wikidataDrug  wdt:P2175  ?indicationEntity .
-            ?indicationEntity  wdt:P1813  ?indication .   -- 简称
+            ?indicationEntity  wdt:P1813  ?indication .   -- 短名称
         }
 
         -- 本地存储：临床试验 ID。
@@ -100,7 +100,7 @@ SELECT * FROM pg_ripple.sparql($$
 $$);
 ```
 
-## 第 5 步 — 检查端点健康和缓存
+## 第 5 步 —— 检查端点运行状况和缓存
 
 ```sql
 -- 哪些端点现在可达？
@@ -111,11 +111,11 @@ ORDER BY last_ping_ms;
 -- 缓存了多少远程结果？
 SELECT * FROM pg_ripple.federation_cache_stats();
 
--- 清除缓存以强制新获取。
+-- 清除缓存以强制全新获取。
 SELECT pg_ripple.reset_cache_stats();
 ```
 
-## 第 6 步 — 检查联邦计划
+## 第 6 步 —— 检查联邦计划
 
 在运行重型联邦查询之前，检查规划器打算如何执行它：
 
@@ -132,32 +132,32 @@ SELECT pg_ripple.explain_sparql($$
 $$, analyze := false);
 ```
 
-健康的联邦计划显示 **BoundJoin** 节点而不是 **IndependentService** 节点。BoundJoin 将本地值批量放入 VALUES 子句并发送单个远程请求；IndependentService 为每行执行 SERVICE 子句 — 对于大型本地结果集要慢得多。
+健康的联邦计划显示 **BoundJoin** 节点而不是 **IndependentService** 节点。BoundJoin 将本地值批量放入 VALUES 子句并发送一个远程请求；IndependentService 为每一行执行 SERVICE 子句 —— 对于大型本地结果集来说要慢得多。
 
-如果您在应该 bound-join 的查询上看到 IndependentService，请确保共享变量（示例中的 `?local`）在查询文本中由 SERVICE 子句*之前*的本地模式绑定。
+如果在应该绑定连接的查询中看到 IndependentService，请确保共享变量（示例中的 `?local`）在查询文本中*SERVICE 子句之前*由本地模式绑定。
 
 ---
 
 ## 断路器和超时
 
-| GUC | 默认 | 效果 |
+| GUC | 默认值 | 效果 |
 |---|---|---|
 | `pg_ripple.federation_timeout_ms` | `5000` | 在这么多毫秒后中止远程调用 |
-| `pg_ripple.federation_retry_count` | `2` | 在跳闸断路器之前重试这么多次 |
-| `pg_ripple.federation_circuit_open_ms` | `60000` | 跳闸后等待这么久再重试 |
+| `pg_ripple.federation_retry_count` | `2` | 在触发断路器之前重试这么多次 |
+| `pg_ripple.federation_circuit_open_ms` | `60000` | 一旦电路跳闸，等待这么长时间再重试 |
 
-当断路器打开时，使用该 SERVICE 端点的查询返回该子模式的空绑定并继续使用本地结果 — 它们不会完全失败。`pg_ripple.federation_endpoint_health()` 视图显示哪些断路器是打开的。
+当电路断开时，使用该 SERVICE 端点的查询会为该子模式返回空绑定并继续使用本地结果 —— 它们不会完全失败。`pg_ripple.federation_endpoint_health()` 视图显示哪些电路是断开的。
 
 ---
 
-## 安全注意事项
+## 安全说明
 
-只注册您信任并控制的端点（或众所周知的公共端点）。联邦电路将查询文本发送到远程端点 — 可能包括来自本地存储的字面值。对于敏感数据，使用本地 SPARQL-over-HTTP 缓存（或 [pg_ripple_http](../features/apis-and-integration.md)）作为代理，而不是直接联邦到公共端点。
+仅注册您信任和控制的端点（或众所周知的公共端点）。联邦电路将查询文本发送到远程端点 —— 可能包括来自本地存储的字面量值。对于敏感数据，请使用本地 SPARQL-over-HTTP 缓存（或 [pg_ripple_http](../features/apis-and-integration.md)）作为代理，而不是直接联邦到公共端点。
 
 ---
 
 ## 另请参阅
 
-- [联邦（SPARQL SERVICE）](../user-guide/sql-reference/federation.md) — 完整 SQL 函数参考。
+- [联邦（SPARQL SERVICE）](../user-guide/sql-reference/federation.md) — 完整的 SQL 函数参考。
 - [向量联邦](../user-guide/vector-federation.md) — 将向量搜索联邦到 Weaviate / Qdrant / Pinecone。
 - [SPARQL 查询调试器](../user-guide/explain-sparql.md)

@@ -1,219 +1,175 @@
-# 常见词汇表包：DCTERMS、Schema.org 和 FOAF
+# Cookbook：通过 JSON-LD Outbox 的 CDC → Kafka
 
-本 cookbook 章节展示如何使用 v0.98.0 中引入的命名包 API 在 pg_ripple 中加载和使用三个广泛部署的链接数据词汇表 — Dublin Core Terms (DCTERMS)、Schema.org 和 FOAF。
+**目标。** 将结构化图变更事件流推送到 Kafka（或 NATS、RabbitMQ、AWS SNS —— 您的事件总线所在的任何地方），无需轮询数据库，并使用下游消费者可以使用与数据库相同的 SHACL 形状进行验证的 JSON-LD 有效负载。
 
-加上 SKOS（v0.98.0），这些包完成了涵盖绝大多数现实世界知识图互操作性的"Big 5"词汇表。
+**为什么选择 pg_ripple。** 结合 CDC 订阅（推送，无轮询）、JSON-LD 框架（schema 形状的有效负载）和事务性 outbox 模式（无丢失事件）。
 
-## 为什么选择这些词汇表？
+**核心结果的时间。** ~30 分钟（大部分用于连接 Kafka 生产者）。
 
-| Vocabulary | 命名空间前缀 | 典型用途 |
+---
+
+## 架构
+
+```
+   triple INSERT/DELETE
+            │
+            ▼
+   ┌────────────────────────┐
+   │ CDC subscription       │  pg_ripple.create_subscription('out_persons',
+   │ filter: SHACL shape    │       filter_shape := '<…/PersonShape>')
+   └─────────┬──────────────┘
+             │ NOTIFY  ──── JSON  ─────┐
+             ▼                          │
+   ┌────────────────────────┐           │
+   │ outbox table           │           │  alternatively, a small
+   │ INSERT trigger writes  │           │  Rust/Python LISTENer
+   │ JSON-LD framed payload │           │
+   └─────────┬──────────────┘           │
+             ▼                          ▼
+   ┌────────────────────────┐  ┌────────────────────────┐
+   │ Debezium / outbox      │  │ asyncpg LISTENer       │
+   │ connector → Kafka      │  │ → Kafka producer       │
+   └────────────────────────┘  └────────────────────────┘
+```
+
+两种有效的实现：
+
+- **Outbox + Debezium**（推荐用于至少一次持久性）。
+- **直接 LISTEN**（推荐用于低延迟、即用即弃流）。
+
+该配方显示了两者。
+
+---
+
+## 第 1 步 —— 定义变更形状
+
+最简单的有效负载是 JSON-LD 框架形状的*整个更新实体*，因此下游消费者看到一个自包含的文档。一次定义 frame：
+
+```sql
+SELECT pg_ripple.register_jsonld_frame('person_event', $JSON$
+{
+  "@context": {
+    "name":  "http://xmlns.com/foaf/0.1/name",
+    "email": "http://xmlns.com/foaf/0.1/mbox",
+    "knows": { "@id": "http://xmlns.com/foaf/0.1/knows", "@type": "@id" }
+  },
+  "@type": "http://xmlns.com/foaf/0.1/Person"
+}
+$JSON$);
+```
+
+## 第 2 步 —— 创建 CDC 订阅
+
+```sql
+-- 可选：创建 SHACL 形状，以便订阅仅对有效的 Person 触发。
+SELECT pg_ripple.load_shacl($TTL$
+@prefix sh:   <http://www.w3.org/ns/shacl#> .
+@prefix foaf: <http://xmlns.com/foaf/0.1/> .
+
+<https://shapes.example.org/PersonShape> a sh:NodeShape ;
+    sh:targetClass foaf:Person ;
+    sh:property [ sh:path foaf:name ; sh:minCount 1 ] .
+$TTL$);
+
+SELECT pg_ripple.create_subscription(
+    'persons_out',
+    filter_sparql := 'SELECT ?s ?p ?o WHERE { ?s a <http://xmlns.com/foaf/0.1/Person> ; ?p ?o }'
+);
+```
+
+## 第 3a 步 —— 直接 LISTEN 生产者
+
+最低延迟路径：一个微小的 LISTENer 读取 NOTIFY 流并直接生成到 Kafka。
+
+```python
+import asyncio, json, asyncpg
+from aiokafka import AIOKafkaProducer
+
+async def main():
+    conn  = await asyncpg.connect("postgresql://…")
+    kafka = AIOKafkaProducer(bootstrap_servers="kafka:9092")
+    await kafka.start()
+    queue: asyncio.Queue = asyncio.Queue()
+
+    def callback(_conn, _pid, _channel, payload):
+        queue.put_nowait(payload)
+
+    await conn.add_listener("pg_ripple_cdc_persons_out", callback)
+
+    while True:
+        raw = await queue.get()
+        evt = json.loads(raw)
+        # 可选地，将更改的实体重新框架化为 JSON-LD。
+        await kafka.send_and_wait("graph.persons", raw.encode())
+
+asyncio.run(main())
+```
+
+CDC 有效负载已经包括 `op`、`s`、`p`、`o`、`g` —— 请参阅 [CDC 订阅](../features/live-views-and-subscriptions.md#cdc-subscriptions)。
+
+对于完整实体有效负载（而不是每三元组事件），在 LISTENer 内调用 `sparql_construct_jsonld()` 在更改时获取框架化的实体。
+
+## 第 3b 步 —— Outbox + Debezium
+
+对于至少一次持久性，您希望事件位于*表*中，由 Debezium 复制。添加一个 outbox 触发器，在写入时具体化 JSON-LD 有效负载：
+
+```sql
+CREATE TABLE outbox (
+    id          BIGSERIAL PRIMARY KEY,
+    aggregate   TEXT NOT NULL,
+    event_type  TEXT NOT NULL,
+    payload     JSONB NOT NULL,
+    created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE OR REPLACE FUNCTION enqueue_person_event() RETURNS trigger AS $$
+DECLARE
+    framed JSONB;
+BEGIN
+    framed := pg_ripple.sparql_construct_jsonld(
+        format(
+            'CONSTRUCT { %s ?p ?o } WHERE { %s ?p ?o }',
+            NEW.s, NEW.s
+        ),
+        frame_name := 'person_event'
+    );
+    INSERT INTO outbox (aggregate, event_type, payload)
+    VALUES (NEW.s, 'PersonChanged', framed);
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+-- pg_ripple.cdc_events 是由每个订阅写入的追赶表。
+CREATE TRIGGER outbox_persons
+AFTER INSERT ON _pg_ripple.cdc_events
+FOR EACH ROW
+WHEN (NEW.subscription = 'persons_out')
+EXECUTE FUNCTION enqueue_person_event();
+```
+
+将 Debezium 指向 `outbox` 表；将其配置为在发布后删除行。该模式是规范的，并且正是 Debezium 的 "outbox event router" SMT 设计的。
+
+## 第 4 步 —— 验证消费者
+
+与过滤 CDC 订阅相同的 SHACL 形状可以作为合同运送给下游消费者。读取 JSON-LD 有效负载的消费者可以使用任何标准 SHACL 库（Python `pyshacl`、Java `topbraid-shacl` 等）对其进行验证。如果合同更改，则只有一个文档更改 —— `<https://shapes.example.org/PersonShape>` 定义。
+
+---
+
+## 失败模式及其处理方式
+
+| 失败 | 直接 LISTEN | Outbox + Debezium |
 |---|---|---|
-| Dublin Core Terms | `dcterms:` | 元数据 — 创建者、日期、主题、权利、格式 |
-| Schema.org | `schema:` | 结构化数据 — 人、组织、产品、地点、事件 |
-| FOAF | `foaf:` | 社交图数据 — 个人、账户、社交连接 |
+| 订阅者崩溃 | 事件丢失 | 事件持久化，重启时重放 |
+| NOTIFY 队列溢出 | 事件被丢弃 | 空数组增长；处理背压 |
+| 消费者慢 | 生产者背压 | 空数组增长；清理滞后 |
+| Schema 偏移 | 消费者解析垃圾 | Outbox + SHACL 在发布前捕获它 |
 
-这三个词汇表已用于数十亿个公共 RDF 文档、Wikidata 导出和企业知识图。加载它们的规则集使 pg_ripple 能够对您已有的数据执行属性层次结构推理、类型包含推理和完整性验证 — 无需任何 schema 更改。
+Outbox 路径有更多代码；作为回报，您可以获得大多数生产事件总线期望的持久性保证。
 
-## 加载包
-
-```sql
--- DCTERMS：11 个 Datalog 规则 + 8 个完整性验证器
-SELECT pg_ripple.load_datalog_bundle('dcterms');
-SELECT pg_ripple.load_shape_bundle('dcterms-integrity');
-
--- Schema.org：15 个 Datalog 规则 + 6 个完整性验证器
-SELECT pg_ripple.load_datalog_bundle('schema');
-SELECT pg_ripple.load_shape_bundle('schema-integrity');
-
--- FOAF：8 个 Datalog 规则 + 5 个完整性验证器
-SELECT pg_ripple.load_datalog_bundle('foaf');
-SELECT pg_ripple.load_shape_bundle('foaf-integrity');
-```
-
-加载后，确认激活：
-
-```sql
-SELECT bundle_name, bundle_version, activated_at
-FROM pg_ripple.active_datalog_bundles
-ORDER BY activated_at;
-```
-
-## DCTERMS — Dublin Core Terms
-
-### 派生属性
-
-`dcterms` 包添加 11 条规则，包括：
-
-- **DC11 兼容性别名** — `dc11:title` 与 `dcterms:title` 等同处理，`creator`、`subject`、`description`、`publisher`、`date`、`type`、`format`、`identifier`、`source`、`language` 同样。
-- **结构逆关系** — `dcterms:hasPart` ↔ `dcterms:isPartOf`、`dcterms:hasVersion` ↔ `dcterms:isVersionOf`、`dcterms:replaces` ↔ `dcterms:isReplacedBy`。
-- **DC-SKOS 桥**（DC-SKOS-01）— 其 `dcterms:subject` 是 SKOS `ConceptScheme` 成员的资源自动接收 `skos:Concept` 类型断言。
-
-### 示例
-
-```sql
--- 使用旧的 dc11: 命名空间加载一些元数据三元组。
-SELECT pg_ripple.load_turtle($$
-@prefix dc11: <http://purl.org/dc/elements/1.0.1/> .
-@prefix dcterms: <http://purl.org/dc/terms/> .
-@prefix ex: <https://example.org/> .
-
-ex:Article1 dc11:creator "Alice" ;
-            dcterms:hasPart ex:Section1 .
-$$);
-
--- 加载 dcterms 规则集。
-SELECT pg_ripple.load_datalog_bundle('dcterms');
-
--- dc11:creator 现在映射到 dcterms:creator。
-SELECT pg_ripple.sparql_select($$
-  SELECT ?article ?creator
-  WHERE { ?article <http://purl.org/dc/terms/creator> ?creator }
-$$);
-
--- dcterms:isPartOf 是从 dcterms:hasPart 派生的。
-SELECT pg_ripple.sparql_select($$
-  SELECT ?part ?whole
-  WHERE { ?part <http://purl.org/dc/terms/isPartOf> ?whole }
-$$);
-```
-
-## Schema.org — 结构化数据词汇表
-
-### 派生属性
-
-`schema` 包添加 15 条规则：
-
-- **逆对** — `schema:subjectOf` ↔ `schema:about`、`schema:hasPart` ↔ `schema:isPartOf`、`schema:workExample` ↔ `schema:exampleOfWork`、`schema:member` ↔ `schema:memberOf`。
-- **类型层次结构** — `schema:LocalBusiness` ⊆ `schema:Organization` ⊆ `schema:Thing`、`schema:Person` ⊆ `schema:Thing`、`schema:Product` ⊆ `schema:Thing`，以及更多。
-- **跨词汇表桥** — `schema:author` → `foaf:maker`（SCHEMA-FOAF-01）、`schema:name` → `dcterms:title`（SCHEMA-DC-01）、`schema:dataset` → `dcat:Dataset`（SCHEMA-DCAT-01）。
-
-### SQL 帮助器：`schema_type_ancestors`
-
-```sql
--- 返回给定 IRI 的所有 Schema.org 类型祖先。
-SELECT ancestor_type
-FROM pg_ripple.schema_type_ancestors('https://schema.org/LocalBusiness');
--- 返回：schema:LocalBusiness、schema:Organization、schema:Thing
-```
-
-### 示例
-
-```sql
--- 加载本地业务。
-SELECT pg_ripple.load_turtle($$
-@prefix schema: <https://schema.org/> .
-@prefix ex: <https://example.org/> .
-
-ex:AcmeCafe a schema:CafeOrCoffeeShop ;
-    schema:name "ACME Café" ;
-    schema:address ex:CafeAddress .
-$$);
-
-SELECT pg_ripple.load_datalog_bundle('schema');
-
--- CafeOrCoffeeShop 是 FoodEstablishment、LocalBusiness、Organization、Thing。
-SELECT pg_ripple.sparql_select($$
-  SELECT ?type
-  WHERE { <https://example.org/AcmeCafe> a ?type }
-  ORDER BY ?type
-$$);
-```
-
-## FOAF — Friend-of-a-Friend
-
-### 派生属性
-
-`foaf` 包添加 8 条规则：
-
-- **`foaf:knows` 对称性** — 如果 Alice 知道 Bob，则 Bob 知道 Alice。
-- **类型包含** — `foaf:Person` ⊆ `foaf:Agent`、`foaf:Organization` ⊆ `foaf:Agent`、`foaf:Group` ⊆ `foaf:Agent`。
-- **逆属性** — `foaf:account` ↔ `foaf:accountFor`、`foaf:made` ↔ `foaf:maker`。
-- **DC-FOAF 桥**（DC-FOAF-01）— `dcterms:creator` 三元组在引用的资源上生成相应的 `foaf:maker` 断言。
-
-### SQL 帮助器：`foaf_persons`
-
-```sql
--- 返回所有 foaf:Person IRI 及其 foaf:name 标签。
-SELECT person_iri, name_label
-FROM pg_ripple.foaf_persons();
-```
-
-### 示例
-
-```sql
--- 加载 FOAF 数据。
-SELECT pg_ripple.load_turtle($$
-@prefix foaf: <http://xmlns.com/foaf/0.0.1/> .
-@prefix ex: <https://example.org/> .
-
-ex:Alice a foaf:Person ;
-    foaf:name "Alice" ;
-    foaf:knows ex:Bob .
-ex:Bob a foaf:Person ;
-    foaf:name "Bob" .
-$$);
-
-SELECT pg_ripple.load_datalog_bundle('foaf');
-
--- foaf:knows 是对称的：Bob 知道 Alice。
-SELECT pg_ripple.sparql_select($$
-  SELECT ?who ?knows
-  WHERE { ?who <http://xmlns.com/foaf/0.0.1/knows> ?knows }
-$$);
-
--- foaf:Person ⊆ foaf:Agent：Alice 也是 foaf:Agent。
-SELECT pg_ripple.sparql_select($$
-  SELECT ?agent
-  WHERE { ?agent a <http://xmlns.com/foaf/0.0.1/Agent> }
-$$);
-```
-
-## 跨词汇表推理
-
-当所有三个包（和 SKOS）一起加载时，跨词汇表桥激活：
-
-| 规则 ID | 效果 |
-|---|---|
-| DC-FOAF-01 | `dcterms:creator ?x` → `foaf:maker ?x` |
-| SCHEMA-FOAF-01 | `schema:author ?x` → `foaf:maker ?x` |
-| SCHEMA-DC-01 | `schema:name ?x` → `dcterms:title ?x` |
-| DC-SKOS-01 | `dcterms:subject ?x` 其中 `?x` 在 ConceptScheme 中 → `?x a skos:Concept` |
-
-这意味着用 `schema:author` 描述的资源可以通过 `foaf:maker` 查询找到，具有 `schema:name` 的资源可以通过 `dcterms:title` 过滤器找到 — 无需任何数据转换。
-
-## 完整性验证
-
-每个词汇表都附带相应的完整性包：
-
-```sql
--- 验证 DCTERMS 约束（标题基数、日期格式等）
-SELECT pg_ripple.load_shape_bundle('dcterms-integrity');
-
--- 验证 Schema.org 约束（必需名称、URL 格式、价格范围等）
-SELECT pg_ripple.load_shape_bundle('schema-integrity');
-
--- 验证 FOAF 约束（主页 IRI、mbox mailto:、名称基数）
-SELECT pg_ripple.load_shape_bundle('foaf-integrity');
-```
-
-完整性违规通过标准 SHACL 验证报告呈现。
-
-## 检查活动的包
-
-```sql
-SELECT bundle_name, bundle_version, activated_at
-FROM pg_ripple.active_datalog_bundles
-ORDER BY bundle_name;
-
--- bundle_name         | bundle_version | activated_at
--- --------------------+----------------+---------------------------
--- dcterms             | 0.99.0         | 2026-05-07 10:00:00+00
--- foaf                | 0.99.0         | 2026-05-07 10:00:01+00
--- schema              | 0.99.0         | 2026-05-07 10:00:02+00
--- skos                | 0.98.0         | 2026-05-07 09:59:59+00
-```
+---
 
 ## 另请参阅
 
-- [SKOS 词库管理](skos-thesaurus.md) — "Big 5"词汇表包套件的第四个成员
-- [SHACL + Datalog 数据质量管道](shacl-datalog-quality.md) — 如何组合规则和形状以获得完整的数据质量管道
+- [实时视图和订阅](../features/live-views-and-subscriptions.md)
+- [导出和共享 —— JSON-LD 框架](../features/exporting-and-sharing.md)
+- [API 和集成 —— `pg_ripple_http`](../features/apis-and-integration.md)

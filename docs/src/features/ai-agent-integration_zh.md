@@ -1,8 +1,8 @@
-# AI 代理集成（LangChain、LlamaIndex 等）
+# AI 代理集成（LangChain、LlamaIndex 和其他）
 
-pg_ripple 的 AI 功能 — 向量搜索、`rag_context()`、`sparql_from_nl()`、图扩展 — 公开为**普通 SQL 函数**。任何可以调用 PostgreSQL 的框架都可以使用它们。无需 SDK。
+pg_ripple 的 AI 功能 —— 向量搜索、`rag_context()`、`sparql_from_nl()`、图扩展 —— 公开为**普通 SQL 函数**。任何可以调用 PostgreSQL 的框架都可以使用它们。无需 SDK。
 
-本页介绍如何将 pg_ripple 接入两个最常见的 Python 代理框架，以及一个与框架无关的工具调用模式。
+本页展示如何将 pg_ripple 接入两个最常见的 Python 代理框架，以及一个与框架无关的工具调用模式。
 
 ---
 
@@ -14,15 +14,15 @@ AI 代理循环如下所示：
 用户问题
      │
      ▼
-   LLM 决定：我是否需要查找某些内容？
+   LLM 决定：我需要查找某些内容吗？
      │
      ├── 是 → 调用工具（通过 SQL 的 pg_ripple 函数）→ 获取上下文
-     │          └── 使用上下文循环回到 LLM
+     │          └── 带上下文循环回 LLM
      │
      └── 否  → 生成最终答案
 ```
 
-pg_ripple 是工具。LLM 通过 `rag_context()`、`sparql_from_nl()` 或自定义 SQL 包装器调用它 — 无论您的框架公开哪个。
+pg_ripple 就是工具。LLM 通过 `rag_context()`、`sparql_from_nl()` 或自定义 SQL 包装器调用它 —— 无论您的框架公开什么。
 
 ---
 
@@ -40,7 +40,7 @@ ALTER SYSTEM SET pg_ripple.llm_model             = 'gpt-4o';
 
 SELECT pg_reload_conf();
 
--- 嵌入您的知识图（一次，然后在新的三元组到达时增量地）。
+-- 嵌入您的知识图谱（一次，然后随着新三元组的到达增量进行）。
 SELECT pg_ripple.embed_entities();
 ```
 
@@ -60,7 +60,7 @@ import psycopg
 DB_URL = "postgresql://..."
 
 def graph_context(question: str) -> str:
-    """从知识图中检索问题的图上下文。"""
+    """从知识图谱中检索问题的图上下文。"""
     with psycopg.connect(DB_URL) as conn:
         cur = conn.cursor()
         cur.execute("SELECT pg_ripple.rag_context(%s, 8)", (question,))
@@ -68,12 +68,12 @@ def graph_context(question: str) -> str:
 
 
 def graph_query(sparql: str) -> str:
-    """针对知识图执行 SPARQL 查询并以 JSON 形式返回结果。"""
+    """针对知识图谱执行 SPARQL 查询并以 JSON 形式返回结果。"""
     with psycopg.connect(DB_URL) as conn:
         cur = conn.cursor()
         cur.execute("SELECT jsonb_agg(row_to_json(r)) FROM pg_ripple.sparql(%s) r", (sparql,))
         result = cur.fetchone()[0]
-        return str(result) if result else "无结果。"
+        return str(result) if result else "No results."
 
 
 def nl_to_sparql_and_run(question: str) -> str:
@@ -86,27 +86,27 @@ def nl_to_sparql_and_run(question: str) -> str:
             (question,)
         )
         result = cur.fetchone()[0]
-        return str(result) if result else "无结果。"
+        return str(result) if result else "No results."
 
 
 tools = [
     Tool(name="graph_context",       func=graph_context,
-         description="为开放式问题检索其情境图。"),
+         description="为开放式问题检索丰富的图上下文。"),
     Tool(name="nl_to_sparql_query",  func=nl_to_sparql_and_run,
-         description="使用 SPARQL 自动生成回答精确的事实性问题。"),
+         description="使用 SPARQL 自动生成来回答精确的事实问题。"),
 ]
 
 llm    = ChatOpenAI(model="gpt-4o", temperature=0)
 prompt = ChatPromptTemplate.from_messages([
-    ("system", "您是一个乐于助人的助手，可以访问知识图。"
-               "对广泛的问题使用 'graph_context'，对特定事实使用 'nl_to_sparql_query'。"),
+    ("system", "You are a helpful assistant with access to a knowledge graph. "
+               "Use 'graph_context' for broad questions and 'nl_to_sparql_query' for specific facts."),
     ("human", "{input}"),
     MessagesPlaceholder("agent_scratchpad"),
 ])
 agent    = create_openai_tools_agent(llm, tools, prompt)
 executor = AgentExecutor(agent=agent, tools=tools, verbose=True)
 
-result = executor.invoke({"input": "哪些药物与胰岛素相互作用，应该避免使用？"})
+result = executor.invoke({"input": "Which drugs interact with insulin and should be avoided?"})
 print(result["output"])
 ```
 
@@ -127,7 +127,7 @@ DB_URL = "postgresql://..."
 
 def retrieve_graph_context(question: str) -> str:
     """
-    在知识图中搜索与问题相关的实体和关系。
+    在知识图谱中搜索与问题相关的实体和关系。
     返回适合 LLM 提示的结构化文本块。
     """
     with psycopg.connect(DB_URL) as conn:
@@ -138,8 +138,8 @@ def retrieve_graph_context(question: str) -> str:
 
 def sparql_fact_lookup(question: str) -> str:
     """
-    通过自动生成和执行 SPARQL 查询来回答精确的事实性问题。
-    用于诸如'有多少'、'列出全部'、'是谁'、'是什么'之类的问题。
+    通过自动生成和执行 SPARQL 查询来回答精确的事实问题。
+    用于诸如'how many'、'list all'、'who is'、'what is'之类的问题。
     """
     with psycopg.connect(DB_URL) as conn:
         cur = conn.cursor()
@@ -149,7 +149,7 @@ def sparql_fact_lookup(question: str) -> str:
             (question,)
         )
         result = cur.fetchone()[0]
-        return str(result) if result else "查询未返回结果。"
+        return str(result) if result else "Query returned no results."
 
 
 tools = [
@@ -158,7 +158,7 @@ tools = [
 ]
 
 agent = ReActAgent.from_tools(tools, llm=OpenAI(model="gpt-4o"), verbose=True)
-response = agent.chat("将二甲双胍与胰岛素联合使用有哪些已知副作用？")
+response = agent.chat("What are the known side effects of combining metformin with insulin?")
 print(response)
 ```
 
@@ -179,13 +179,13 @@ TOOLS = [
         "type": "function",
         "function": {
             "name": "rag_context",
-            "description": "从知识图中检索与开放式问题相关的上下文。",
+            "description": "从知识图谱中检索与开放式问题相关的上下文。",
             "parameters": {
                 "type": "object",
                 "properties": {
                     "question": {"type": "string"},
                     "k":        {"type": "integer", "default": 8,
-                                 "description": "要检索的实体数量。"}
+                                 "description": "要检索的实体数。"}
                 },
                 "required": ["question"],
             },
@@ -195,7 +195,7 @@ TOOLS = [
         "type": "function",
         "function": {
             "name": "sparql_fact_lookup",
-            "description": "使用自动生成的 SPARQL 回答精确的事实性问题。",
+            "description": "使用自动生成的 SPARQL 回答精确的事实问题。",
             "parameters": {
                 "type": "object",
                 "properties": {"question": {"type": "string"}},
@@ -219,8 +219,8 @@ def dispatch(tool_name: str, args: dict) -> str:
                 (args["question"],)
             )
             result = cur.fetchone()[0]
-            return str(result) if result else "无结果。"
-    return "未知工具。"
+            return str(result) if result else "No results."
+    return "Unknown tool."
 
 
 def agent_loop(question: str, max_turns: int = 5) -> str:
@@ -239,28 +239,28 @@ def agent_loop(question: str, max_turns: int = 5) -> str:
                 })
         else:
             return msg.content
-    return "达到最大轮数。"
+    return "Max turns reached."
 
 
-print(agent_loop("哪些药物与胰岛素相互作用，应该避免使用？"))
+print(agent_loop("Which drugs interact with insulin and should be avoided?"))
 ```
 
 ---
 
 ## 生产代理的提示
 
-- **缓存 `rag_context()` 结果**每个问题哈希（大多数问题会重复）。Redis 或 PostgreSQL 缓存在工具调用之前可以显著降低 LLM 成本和延迟。
+- **缓存 `rag_context()` 结果** 按问题哈希（大多数问题会重复）。在工具调用前使用 Redis 或 PostgreSQL 缓存可显著降低 LLM 成本和延迟。
 - **设置 `pg_ripple.sparql_query_timeout`** 以限制失控的自动生成 SPARQL 查询。
-- **使用 few-shot 示例**（`pg_ripple.add_llm_example()`）用于特定领域词汇 — 大幅降低 NL→SPARQL 错误率。
-- **将工具调用结果记录到** `_pg_ripple.audit_log`（当 `audit_log_enabled = on` 时默认启用）— 然后每个 RAG 检索都是可审计的，这对受监管的行业很重要。
-- **多租户**：在每个租户的代理会话使用的 PostgreSQL 连接上应用 [图 RLS](multi-tenant-graphs.md) — `rag_context()` 自动遵守 RLS。
+- **使用少样本示例**（`pg_ripple.add_llm_example()`）用于领域特定词汇表 —— 显著降低专门化图的 NL→SPARQL 错误率。
+- **将工具调用结果记录到 `_pg_ripple.audit_log`**（默认启用，当 `audit_log_enabled = on` 时）—— 然后每个 RAG 检索都是可审计的，这对于受监管的行业很重要。
+- **多租户**：在每个租户的代理会话使用的 PostgreSQL 连接上应用[图 RLS](multi-tenant-graphs.md) —— `rag_context()` 自动遵守 RLS。
 
 ---
 
 ## v1.1.0 中即将推出的内容
 
-- 原生 LangChain `BaseTool` 和 LlamaIndex `QueryEngineTool` 包装器发布到 PyPI 作为 `pg-ripple-langchain` 和 `pg-ripple-llamaindex`。
-- 通过 pg_ripple 游标 API 流式传输工具结果（用于大型图上下文块）。
+- 原生 LangChain `BaseTool` 和 LlamaIndex `QueryEngineTool` 包装器作为 `pg-ripple-langchain` 和 `pg-ripple-llamaindex` 发布到 PyPI。
+- 通过 pg_ripple 游标 API 流式传输工具结果（对于大型图谱包有用）。
 - 图感知对话记忆：将对话历史存储为 RDF 三元组，以便代理可以推理过去的交互。
 
 ---
@@ -268,6 +268,6 @@ print(agent_loop("哪些药物与胰岛素相互作用，应该避免使用？")
 ## 另请参阅
 
 - [AI 概述](ai-overview.md) — 何时使用哪个 AI 功能。
-- [RAG 管道](../user-guide/rag-pipeline.md) — `rag_context()` 深入探讨。
-- [NL → SPARQL](nl-to-sparql.md) — `sparql_from_nl()` 和 few-shot 调整。
-- [Cookbook：基于地面的聊天机器人](../cookbook/grounded-chatbot.md) — 简单的单代理配方。
+- [RAG 管道](../user-guide/rag-pipeline.md) — `rag_context()` 深入了解。
+- [NL → SPARQL](nl-to-sparql.md) — `sparql_from_nl()` 和少样本调优。
+- [Cookbook：基于知识图谱的聊天机器人](../cookbook/grounded-chatbot.md) — 更简单的单代理配方。

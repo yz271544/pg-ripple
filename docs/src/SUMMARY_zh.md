@@ -1,4 +1,4 @@
-# 总结
+# 摘要
 
 [什么是 pg_ripple？](landing.md)
 
@@ -7,9 +7,9 @@
 # 评估
 
 - [何时使用 pg_ripple](evaluate/when-to-use.md)
-- [架构概览](evaluate/architecture-glance.md)
-- [与替代方案的对比](evaluate/comparison.md)
-- [性能与符合性结果](evaluate/performance-results.md)
+- [架构一览](evaluate/architecture-glance.md)
+- [与替代方案的比较](evaluate/comparison.md)
+- [性能和一致性结果](evaluate/performance-results.md)
 - [v0.132.0 浸泡测试证据](benchmarks/soak-0.132.0.md)
 
 ---
@@ -17,32 +17,32 @@
 # 入门
 
 - [安装](getting-started/installation.md)
-- [Hello World — 五分钟演练](getting-started/hello-world.md)
-- [引导式教程 — 在 30 分钟内构建知识图谱](getting-started/tutorial.md)
-- [关键概念 — PostgreSQL 用户的 RDF](getting-started/key-concepts.md)
-- [演练场 — 无需安装即可试用](user-guide/playground.md)
+- [Hello World —— 五分钟演练](getting-started/hello-world.md)
+- [引导式教程 —— 30 分钟构建知识图谱](getting-started/tutorial.md)
+- [关键概念 —— 面向 PostgreSQL 用户的 RDF](getting-started/key-concepts.md)
+- [Playground —— 无需安装即可试用](user-guide/playground.md)
 
 ---
 
-# 功能深度探索
+# 功能深入探讨
 
 - [存储知识](features/storing-knowledge.md)
 - [加载数据](features/loading-data.md)
 - [使用 SPARQL 查询](features/querying-with-sparql.md)
-- [验证数据质量（SHACL）](features/validating-data-quality.md)
-- [推理和推断（Datalog）](features/reasoning-and-inference.md)
+- [验证数据质量 (SHACL)](features/validating-data-quality.md)
+- [推理和演绎 (Datalog)](features/reasoning-and-inference.md)
 - [导出和共享](features/exporting-and-sharing.md)
 - [实时视图和订阅](features/live-views-and-subscriptions.md)
-- [地理空间（GeoSPARQL）](features/geospatial.md)
+- [地理空间 (GeoSPARQL)](features/geospatial.md)
 - [全文搜索](features/full-text-search.md)
-- [时间性和出处](features/temporal-and-provenance.md)
+- [时序与出处](features/temporal-and-provenance.md)
 - [多租户图](features/multi-tenant-graphs.md)
-- [OWL 2 Profiles（RL / EL / QL）](features/owl-profiles.md)
+- [OWL 2 Profiles (RL / EL / QL)](features/owl-profiles.md)
 - [SHACL-SPARQL 规则](features/shacl-sparql-rules.md)
-- [R2RML — 关系型到 RDF](features/r2rml.md)
-- [格 Datalog — 何时及为何](features/lattice-datalog.md)
-- [高级推理：WCOJ、DRed 和 Tabling](features/advanced-inference.md)
-- [图分析（PageRank）](features/pagerank.md)
+- [R2RML —— 关系型到 RDF](features/r2rml.md)
+- [网格 Datalog —— 何时与为何](features/lattice-datalog.md)
+- [高级推理：WCOJ、DRed 与 Tabling](features/advanced-inference.md)
+- [图分析 (PageRank)](features/pagerank.md)
 - [概率推理](features/uncertain-knowledge.md)
 - [CDC 订阅](features/cdc-subscriptions.md)
 - [实时 SPARQL 订阅](features/live-subscriptions.md)
@@ -51,48 +51,48 @@
 
 ---
 
-# AI、RAG & 记录链接
+# AI、RAG 与记录链接
 
-- [AI 概述 — 决策树](features/ai-overview.md)
-- [向量和混合搜索](features/vector-and-hybrid-search.md)
-- [RAG 管道 — `rag_context()`](user-guide/rag-pipeline.md)
+- [AI 概述 —— 决策树](features/ai-overview.md)
+- [向量与混合搜索](features/vector-and-hybrid-search.md)
+- [RAG 管道 —— `rag_context()`](user-guide/rag-pipeline.md)
 - [自然语言到 SPARQL](features/nl-to-sparql.md)
-- [知识图谱嵌入（KGE）](features/knowledge-graph-embeddings.md)
-- [记录链接和实体解析](features/record-linkage.md)
-- [GraphRAG（Microsoft）](features/graphrag.md)
+- [知识图谱嵌入 (KGE)](features/knowledge-graph-embeddings.md)
+- [记录链接与实体解析](features/record-linkage.md)
+- [GraphRAG (Microsoft)](features/graphrag.md)
 - [向量联邦](user-guide/vector-federation.md)
 - [AI 代理集成（LangChain、LlamaIndex）](features/ai-agent-integration.md)
 
 ---
 
-# 用例手册
+# 用例 Cookbook
 
-- [RDF 索引](cookbook/index.md)
-- [来自关系目录的知识图谱](cookbook/relational-to-rdf.md)
+- [配方索引](cookbook/index.md)
+- [从关系目录构建知识图谱](cookbook/relational-to-rdf.md)
 - [基于知识图谱的聊天机器人](cookbook/grounded-chatbot.md)
 - [去重客户记录](cookbook/dedupe-customers.md)
-- [隐私保护记录链接（PPRL）](cookbook/pprl.md)
-- [使用 PROV-O 和时间查询的审计跟踪](cookbook/audit-trail.md)
-- [CDC → 通过 JSON-LD Outbox 发送至 Kafka](cookbook/cdc-to-kafka.md)
-- [软约束的概率规则](cookbook/probabilistic-rules.md)
+- [隐私保护记录链接 (PPRL)](cookbook/pprl.md)
+- [使用 PROV-O 与时序查询的审计跟踪](cookbook/audit-trail.md)
+- [CDC → 通过 JSON-LD Outbox 的 Kafka](cookbook/cdc-to-kafka.md)
+- [用于软约束的概率规则](cookbook/probabilistic-rules.md)
 - [规则库](cookbook/rule-libraries.md)
 - [SPARQL 修复工作流](cookbook/sparql-repair.md)
-- [本体映射和对齐](cookbook/ontology-mapping.md)
-- [LLM 工作流 — NL 到知识图谱答案](cookbook/llm-workflow.md)
-- [与 Wikidata 和 DBpedia 的联邦](cookbook/federation-wikidata.md)
+- [本体映射与对齐](cookbook/ontology-mapping.md)
+- [LLM 工作流 —— NL 到知识图谱答案](cookbook/llm-workflow.md)
+- [使用 Wikidata 和 DBpedia 进行联邦](cookbook/federation-wikidata.md)
 - [SHACL + Datalog 数据质量管道](cookbook/shacl-datalog-quality.md)
-- [SKOS 词库管理](cookbook/skos-thesaurus.md)
-- [常用词汇包：DCTERMS、Schema.org、FOAF](cookbook/common-vocabularies.md)
+- [SKOS 叙词表管理](cookbook/skos-thesaurus.md)
+- [常见词汇捆绑包：DCTERMS、Schema.org、FOAF](cookbook/common-vocabularies.md)
 - [从 Neo4j 迁移](cookbook/migrate-from-neo4j.md)
 - [从头开始构建 RAG 管道](cookbook/rag-pipeline-from-scratch.md)
 - [规则库联邦](cookbook/rule-federation.md)
 
 ---
 
-# API 和集成
+# API 与集成
 
 - [API 和集成概述](features/apis-and-integration.md)
-- [SPARQL 查询调试器 — `EXPLAIN SPARQL`](user-guide/explain-sparql.md)
+- [SPARQL 查询调试器 —— `EXPLAIN SPARQL`](user-guide/explain-sparql.md)
 - [规则库联邦指南](guides/rule-library-federation.md)
 
 ---
@@ -100,33 +100,33 @@
 # 运维
 
 - [架构概述](operations/architecture.md)
-- [生产就绪清单](operations/production-checklist.md)
+- [生产就绪检查清单](operations/production-checklist.md)
 - [部署模型](operations/deployment.md)
 - [Docker（开箱即用）](operations/docker.md)
-- [Kubernetes 和 Helm](operations/kubernetes.md)
+- [Kubernetes 与 Helm](operations/kubernetes.md)
 - [CloudNativePG](operations/cloudnativepg.md)
 - [高可用性](operations/high-availability.md)
 - [逻辑复制](operations/replication.md)
 - [CDC 运维](operations/cdc.md)
 - [Citus + pg-trickle 集成](operations/citus-integration.md)
-- [pg-tide 中继：中心辐射](operations/pg-tide-relay.md)
+- [pg-tide 中继：星型拓扑](operations/pg-tide-relay.md)
 - [pg-trickle 中继（旧版重定向）](operations/pg-trickle-relay.md)
-- [Bidi 运维 Runbook](operations/bidi-runbook.md)
-- [Bidi 生产清单](operations/bidi-production-checklist.md)
+- [Bidi 运维运行手册](operations/bidi-runbook.md)
+- [Bidi 生产检查清单](operations/bidi-production-checklist.md)
 - [配置](operations/configuration.md)
 - [调优](operations/tuning.md)
-- [监控和可观察性](operations/monitoring.md)
-- [OpenTelemetry 可观察性指南](operations/observability-otel.md)
+- [监控和可观测性](operations/monitoring.md)
+- [OpenTelemetry 可观测性指南](operations/observability-otel.md)
 - [性能调优](operations/performance.md)
 - [并行合并工作线程](operations/merge-workers.md)
-- [备份和灾难恢复](operations/backup-recovery.md)
+- [备份与灾难恢复](operations/backup-recovery.md)
 - [安全升级](operations/upgrading.md)
 - [扩展](operations/scaling.md)
-- [读副本](operations/read-replicas.md)
+- [读取副本](operations/read-replicas.md)
 - [故障排除](operations/troubleshooting.md)
 - [安全](operations/security.md)
 - [兼容性矩阵](operations/compatibility.md)
-- [HTTP 伴随服务运维](operations/http-companion.md)
+- [HTTP 配套服务运维](operations/http-companion.md)
 
 ---
 
@@ -150,7 +150,7 @@
 - [SQL 函数参考](reference/sql-functions.md)
 - [SQL API 参考](reference/sql-api.md)
 - [SQL 参考索引](user-guide/sql-reference/index.md)
-- [三元组 CRUD](user-guide/sql-reference/triple-crud.md)
+- [Triple CRUD](user-guide/sql-reference/triple-crud.md)
 - [批量加载](user-guide/sql-reference/bulk-load.md)
 - [SPARQL 查询](user-guide/sql-reference/sparql-query.md)
 - [SPARQL 更新](user-guide/sql-reference/sparql-update.md)
@@ -160,7 +160,7 @@
 - [命名图](user-guide/sql-reference/named-graphs.md)
 - [联邦](user-guide/sql-reference/federation.md)
 - [全文搜索](user-guide/sql-reference/fts.md)
-- [游标 API](user-guide/sql-reference/cursor-api.md)
+- [Cursor API](user-guide/sql-reference/cursor-api.md)
 - [视图](user-guide/sql-reference/views.md)
 - [框架视图](user-guide/sql-reference/framing-views.md)
 - [序列化](user-guide/sql-reference/serialization.md)
@@ -182,12 +182,12 @@
 - [GraphRAG 本体](reference/graphrag-ontology.md)
 - [GeoSPARQL 函数](reference/geosparql.md)
 - [GeoSPARQL 函数索引](reference/geosparql-functions.md)
-- [基于格的 Datalog](reference/lattice-datalog.md)
+- [基于网格的 Datalog](reference/lattice-datalog.md)
 - [HTTP API 参考](reference/http-api.md)
 - [限制和配额](reference/limits.md)
-- [近似聚合（HLL）](reference/approximate-aggregates.md)
+- [近似聚合 (HLL)](reference/approximate-aggregates.md)
 - [Arrow Flight 参考](reference/arrow-flight.md)
-- [Citus SERVICE 分片修剪](reference/citus-service-pruning.md)
+- [Citus SERVICE 分片剪枝](reference/citus-service-pruning.md)
 - [API 稳定性保证](reference/api-stability.md)
 - [SPARQL 参考](reference/sparql.md)
 - [Datalog 参考](reference/datalog.md)
@@ -198,20 +198,20 @@
 - [联邦参考](reference/federation.md)
 - [CDC 参考](reference/cdc.md)
 - [GraphRAG 参考](reference/graphrag.md)
-- [可观察性参考](reference/observability.md)
+- [可观测性参考](reference/observability.md)
 - [查询优化](reference/query-optimization.md)
 - [向量搜索参考](reference/vector-search.md)
 - [开发参考](reference/development.md)
-- [SPARQL 符合性矩阵](reference/sparql-compliance.md)
+- [SPARQL 一致性矩阵](reference/sparql-compliance.md)
 - [SPARQL 1.2 属性路径状态](reference/sparql12-status.md)
-- [W3C 符合性](reference/w3c-conformance.md)
-- [符合性趋势](reference/conformance-trends.md)
+- [W3C 一致性](reference/w3c-conformance.md)
+- [一致性趋势](reference/conformance-trends.md)
 - [Jena 结果](reference/jena-results.md)
 - [OWL 2 RL 结果](reference/owl2rl-results.md)
 - [WatDiv 结果](reference/watdiv-results.md)
 - [LUBM 结果](reference/lubm-results.md)
 - [向量索引权衡](reference/vector-index-tradeoffs.md)
-- [运行符合性测试](reference/running-conformance-tests.md)
+- [运行一致性测试](reference/running-conformance-tests.md)
 - [错误代码](reference/error-codes.md)
 - [错误目录](reference/error-catalog.md)
 - [可扩展性](reference/scalability.md)
@@ -226,7 +226,7 @@
 # 研究
 
 - [研究索引](research/index.md)
-- [PostgreSQL 三元组存储深度探索](research/postgresql-deepdive.md)
+- [PostgreSQL 三元组存储深入探讨](research/postgresql-deepdive.md)
 
 ---
 

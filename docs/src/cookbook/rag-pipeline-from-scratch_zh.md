@@ -1,13 +1,13 @@
 # 从头开始构建 RAG 管道
 
-本食谱介绍如何使用 pg_ripple 的混合 SPARQL + 向量搜索构建完整的检索增强生成（RAG）管道。最后，您将获得一个使用您的知识图作为上下文源来回答自然语言问题的系统。
+本配方引导您使用 pg_ripple 的混合 SPARQL + 向量搜索构建完整的检索增强生成（RAG）管道。最后，您将拥有一个使用您的知识图谱作为上下文来源来回答自然语言问题的系统。
 
 ## 架构
 
 ```mermaid
 flowchart LR
     Q[用户问题] --> E[嵌入问题\npg_ripple.embed_text]
-    E --> V[向量相似度搜索\n_pg_ripple.embeddings]
+    E --> V[向量相似性搜索\n_pg_ripple.embeddings]
     V --> F[SPARQL 过滤器\nopt. 约束]
     F --> R[检索到的实体\n+ 图上下文]
     R --> P[构建 LLM 提示]
@@ -20,7 +20,7 @@ flowchart LR
 - pg_ripple v0.49.0 或更高版本（NL→SPARQL），v0.28.0+（向量嵌入）
 - 已安装 pgvector 扩展
 - OpenAI API 密钥（或任何 OpenAI 兼容端点）
-- Python 3.11+，安装 `psycopg`、`openai`、`requests`
+- Python 3.11+ 及 `psycopg`、`openai`、`requests`
 
 ```bash
 pip install psycopg openai requests
@@ -51,14 +51,14 @@ ALTER SYSTEM SET pg_reload_conf();
 
 ---
 
-## 第 2 步：加载您的知识图
+## 第 2 步：加载您的知识图谱
 
 ```sql
 -- 加载领域数据
 SELECT pg_ripple.load_turtle($$
   @prefix ex: <https://pharma.example/> .
   @prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
-  @prefix schema: <https://schema.org/>
+  @prefix schema: <https://schema.org/> .
 
   ex:aspirin a ex:Drug ;
     rdfs:label "Aspirin" ;
@@ -79,25 +79,25 @@ $$, 'https://pharma.example/graph');
 
 ---
 
-## 第 3 步：嵌入知识图
+## 第 3 步：嵌入知识图谱
 
-触发所有加载实体的嵌入生成：
+为所有加载的实体触发嵌入生成：
 
 ```sql
--- 手动嵌入所有实体（如果在加载期间 auto_embed 为 off）
+-- 手动嵌入所有实体（如果加载期间 auto_embed 关闭）
 SELECT pg_ripple.embed_all_entities();
 
 -- 检查嵌入覆盖率
 SELECT COUNT(*) FROM _pg_ripple.embeddings;
 ```
 
-或者使用 `auto_embed = on`，嵌入由后台工作线程在三元组加载时自动生成。
+或者使用 `auto_embed = on`，后端工作进程会在加载三元组时自动生成嵌入。
 
 ---
 
 ## 第 4 步：通过 HTTP API 查询
 
-`/rag` 端点处理完整的管道：
+`/rag` 端点处理完整管道：
 
 ```bash
 # 简单问题
@@ -184,7 +184,7 @@ def answer(question: str, sparql_filter: str | None = None) -> str:
     return response.choices[0].message.content
 
 
-# 示例用法
+# 用法示例
 print(answer("What NSAIDs are approved by the FDA?"))
 print(answer(
     "Which drugs treat fever?",
@@ -196,7 +196,7 @@ print(answer(
 
 ## 第 6 步：使用 SPARQL 约束进行过滤
 
-使用 `sparql_filter` 将检索限制为类或子图：
+使用 `sparql_filter` 将检索限制到类或子图：
 
 ```python
 # 仅检索 FDA 批准的药物
@@ -213,13 +213,13 @@ answer(
 
 ## 第 7 步：使用 SHACL 进行数据质量
 
-添加 SHACL 约束以确保您的知识图包含完整的 RAG 信息：
+添加 SHACL 约束以确保您的知识图谱包含 RAG 所需的完整信息：
 
 ```sql
 SELECT pg_ripple.load_shacl($$
   @prefix sh: <http://www.w3.org/ns/shacl#> .
   @prefix ex: <https://pharma.example/> .
-  @prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#>
+  @prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
 
   ex:DrugShape a sh:NodeShape ;
     sh:targetClass ex:Drug ;
@@ -243,7 +243,7 @@ SELECT pg_ripple.validate();
 
 ## 第 8 步：使用图上下文获得更丰富的嵌入
 
-对于语义上更丰富的嵌入，启用图上下文模式：
+对于语义更丰富的嵌入，请启用图上下文模式：
 
 ```sql
 ALTER SYSTEM SET pg_ripple.use_graph_context = on;
@@ -253,13 +253,13 @@ SELECT pg_reload_conf();
 SELECT pg_ripple.embed_all_entities(force_recompute := true);
 ```
 
-启用 `use_graph_context = on` 后，每个实体都与其序列化为文本的完整 RDF 邻域一起嵌入，从而产生捕获图结构而不仅仅是实体标签的嵌入。
+使用 `use_graph_context = on`，每个实体都嵌入其完整的 RDF 邻域（序列化为文本），生成的嵌入捕获图结构 —— 而不仅仅是实体标签。
 
 ---
 
 ## 第 9 步：NL → SPARQL 生成（高级）
 
-对于复杂查询，使用 NL → SPARQL 端点直接生成和执行 SPARQL：
+对于复杂查询，请使用 NL → SPARQL 端点直接生成并执行 SPARQL：
 
 ```sql
 -- 配置 LLM
@@ -280,8 +280,8 @@ SELECT pg_ripple.sparql_from_nl(
 
 - [ ] 从密钥管理器设置 `pg_ripple.embedding_api_key`（而不是 `ALTER SYSTEM`）
 - [ ] 在所有 HTTP 端点上启用 `PG_RIPPLE_HTTP_AUTH_TOKEN`
-- [ ] 配置 `pg_ripple.sparql_max_rows` 以限制失控的查询
-- [ ] 监控 `pg_ripple_embedding_queue_depth` Prometheus 监控器 — 如果 > 10,000，则增加工作线程
+- [ ] 配置 `pg_ripple.sparql_max_rows` 以限制失控查询
+- [ ] 监视 `pg_ripple_embedding_queue_depth` Prometheus gauge —— 如果 > 10,000 则增加工作线程
 - [ ] 使用 `pg_ripple.export_max_rows` 防止大型 RAG 上下文溢出
 - [ ] 添加 SHACL 形状以确保所有实体都有标签（RAG 上下文所需）
 
