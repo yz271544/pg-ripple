@@ -10,15 +10,15 @@
 unmaintained = "none"
 yanked = "deny"
 
-# Pre-existing advisories not introduced by pg_ripple — triaged and tracked.
-# Review before each release to ensure no new vulnerabilities are silently ignored.
+# Temporary upstream advisories that have been triaged and mitigated locally.
+# Review before each release and remove once compatible fixed releases exist.
 ignore = [
-    # RUSTSEC-2026-0104: pre-existing transitive dependency advisory
-    { id = "RUSTSEC-2026-0104", reason = "pre-existing transitive dependency; tracked for upstream fix" },
-    # RUSTSEC-2024-0436: pre-existing unmaintained crate warning
-    { id = "RUSTSEC-2024-0436", reason = "pre-existing unmaintained transitive dependency; tracked for replacement" },
-    # RUSTSEC-2021-0127: pre-existing advisory
-    { id = "RUSTSEC-2021-0127", reason = "pre-existing transitive dependency advisory; tracked for upstream fix" },
+    # rio_xml 0.8.6 pins quick-xml 0.36 and the Oxigraph dev dependency pins
+    # quick-xml 0.37. Runtime RDF/XML entry points reject start tags over 64 KiB,
+    # bounding both attack paths until rio_xml can be replaced by oxrdfxml built
+    # on quick-xml >=0.41. The second affected copy is test-only.
+    { id = "RUSTSEC-2026-0194", reason = "upstream version constraint; runtime RDF/XML start-tag size is locally bounded" },
+    { id = "RUSTSEC-2026-0195", reason = "upstream version constraint; runtime RDF/XML start-tag size is locally bounded" },
 ]
 
 [licenses]

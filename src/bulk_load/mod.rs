@@ -39,8 +39,76 @@ use crate::storage;
 /// Number of triples to collect before flushing a batch insert.
 const BATCH_SIZE: usize = 10_000;
 
+/// Bound the amount of work an XML parser may perform for one start tag.
+///
+/// `rio_xml` currently depends on a pre-0.41 `quick-xml`, whose duplicate
+/// attribute detection is quadratic and whose namespace resolver allocates
+/// proportionally to the number of declarations.  Rejecting oversized start
+/// tags before invoking it bounds both behaviours until `rio_xml` can be
+/// replaced by a parser built on a fixed `quick-xml` release.
+const MAX_RDFXML_START_TAG_BYTES: usize = 64 * 1024;
+
 /// Last cache-full percentage we warned about (per-process; avoids warning storms).
 static LAST_WARNED_CACHE_PCT: AtomicU8 = AtomicU8::new(0);
+
+fn validate_rdfxml_start_tags(data: &str) -> Result<(), &'static str> {
+    let bytes = data.as_bytes();
+    let mut cursor = 0;
+
+    while let Some(relative_start) = bytes[cursor..].iter().position(|byte| *byte == b'<') {
+        let start = cursor + relative_start;
+        let Some(&first) = bytes.get(start + 1) else {
+            break;
+        };
+
+        // Only opening element tags can contain attributes and namespace
+        // declarations.  Skipping closing tags, comments, CDATA, processing
+        // instructions, and declarations also avoids treating their contents
+        // as element attributes.
+        if !(first.is_ascii_alphabetic() || first == b'_' || first == b':' || first >= 0x80) {
+            cursor = start + 2;
+            continue;
+        }
+
+        let mut quote = None;
+        let mut end = start + 1;
+        while end < bytes.len() {
+            let byte = bytes[end];
+            match quote {
+                Some(delimiter) if byte == delimiter => quote = None,
+                Some(_) => {}
+                None if byte == b'\'' || byte == b'"' => quote = Some(byte),
+                None if byte == b'>' => break,
+                None => {}
+            }
+
+            if end - start > MAX_RDFXML_START_TAG_BYTES {
+                return Err("RDF/XML start tag exceeds 64 KiB safety limit");
+            }
+            end += 1;
+        }
+        cursor = end.saturating_add(1);
+    }
+
+    Ok(())
+}
+
+#[cfg(test)]
+mod rdfxml_safety_tests {
+    use super::validate_rdfxml_start_tags;
+
+    #[test]
+    fn accepts_normal_tags_and_quoted_angle_brackets() {
+        let xml = r#"<rdf:Description rdf:about="https://example.test/?a>b"><name>x</name></rdf:Description>"#;
+        assert!(validate_rdfxml_start_tags(xml).is_ok());
+    }
+
+    #[test]
+    fn rejects_oversized_start_tags() {
+        let xml = format!("<rdf:Description {}>", "a='x' ".repeat(12_000));
+        assert!(validate_rdfxml_start_tags(&xml).is_err());
+    }
+}
 
 // ─── rio_api term encoding ───────────────────────────────────────────────────
 
@@ -436,6 +504,8 @@ pub fn load_rdfxml_file_into_graph(path: &str, g_id: i64) -> i64 {
 /// are not supported in the RDF/XML format; all triples are loaded into the
 /// default graph.
 pub fn load_rdfxml(data: &str, _strict: bool) -> i64 {
+    validate_rdfxml_start_tags(data).unwrap_or_else(|e| pgrx::error!("{e}"));
+
     let generation = storage::next_load_generation();
     let mut by_predicate: PredicateBatch = HashMap::new();
     let mut touched: std::collections::HashSet<i64> = std::collections::HashSet::new();
@@ -535,6 +605,8 @@ pub fn load_turtle_into_graph(data: &str, g_id: i64) -> i64 {
 
 /// Load RDF/XML data into a specific graph.  Returns the number of triples loaded.
 pub fn load_rdfxml_into_graph(data: &str, g_id: i64) -> i64 {
+    validate_rdfxml_start_tags(data).unwrap_or_else(|e| pgrx::error!("{e}"));
+
     let generation = storage::next_load_generation();
     let mut by_predicate: PredicateBatch = HashMap::new();
     let mut touched: std::collections::HashSet<i64> = std::collections::HashSet::new();
