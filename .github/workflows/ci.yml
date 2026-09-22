@@ -70,7 +70,7 @@ jobs:
           echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] https://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" | sudo tee /etc/apt/sources.list.d/pgdg.list
           sudo apt-get update -qq
           sudo apt-get install -y --no-install-recommends \
-            build-essential pkg-config libssl-dev libclang-dev clang lld \
+            build-essential pkg-config libssl-dev libclang-dev clang lld sudo \
             postgresql-18 postgresql-server-dev-18
           sudo chown -R "$USER" \
             /usr/share/postgresql/18/extension \
@@ -171,7 +171,12 @@ jobs:
       - name: Run pg_test suite
         env:
           RUST_TEST_THREADS: "1"
-        run: cargo pgrx test pg18
+        run: |
+          # pgrx delegates initdb/postgres to the requested system user.  The
+          # Gitea Ubuntu job image starts steps as root, while PostgreSQL
+          # refuses to initialise a cluster as root.
+          sudo install -d -o postgres -g postgres target/test-pgdata
+          cargo pgrx test pg18 --runas postgres --pgdata target/test-pgdata
 
       # L15-09 (v0.97.0): cargo doc missing-documentation gate.
       # Enforce that all public items have rustdoc comments (M15-15/v0.96.0 pass).
