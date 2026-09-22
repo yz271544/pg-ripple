@@ -10,13 +10,13 @@ name: Migration Chain
 
 on:
   push:
-    branches: [main]
+    branches: [main, dev/develop]
     paths:
       - 'sql/**.sql'
       - 'pg_ripple.control'
       - 'tests/test_migration_chain.sh'
   pull_request:
-    branches: [main]
+    branches: [main, dev/develop]
     paths:
       - 'sql/**.sql'
       - 'pg_ripple.control'

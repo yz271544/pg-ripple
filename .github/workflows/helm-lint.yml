@@ -2,11 +2,11 @@ name: Helm Lint
 
 on:
   push:
-    branches: [main]
+    branches: [main, dev/develop]
     paths:
       - 'charts/**'
   pull_request:
-    branches: [main]
+    branches: [main, dev/develop]
     paths:
       - 'charts/**'
   workflow_dispatch:
