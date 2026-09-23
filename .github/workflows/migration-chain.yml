@@ -39,6 +39,14 @@ env:
   CARGO_TERM_COLOR: always
   PGRX_VERSION: "0.18.0"
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+  # Disable rustup's automatic channel-update sync.  The Gitea runner
+  # occasionally hits `tls handshake eof` while downloading
+  # `channel-rust-*.toml.sha256` from static.rust-lang.org; with the
+  # toolchain already provisioned by dtolnay/rust-toolchain@stable we
+  # have no need for that check.  RUSTUP_AUTO_INSTALL=0 also keeps
+  # rustup from trying to fetch a fresh toolchain if anything routes
+  # through it unexpectedly.
+  RUSTUP_AUTO_INSTALL: "0"
 
 jobs:
   migration-chain:

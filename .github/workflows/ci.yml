@@ -239,7 +239,17 @@ jobs:
         run: cargo pgrx init --pg18 /usr/lib/postgresql/18/bin/pg_config
 
       - name: Run pg_regress suite
-        run: cargo pgrx regress pg18 --postgresql-conf "allow_system_table_mods=on"
+        run: |
+          # Same root-vs-postgres workaround as the `test` job: pgrx delegates
+          # initdb/postgres to the requested system user, and PostgreSQL
+          # refuses to initialise a cluster as root.  Use an absolute pgdata
+          # path because pgrx changes directory while running initdb.
+          PGTESTDATA="${GITHUB_WORKSPACE}/target/regress-pgdata"
+          sudo install -d -o postgres -g postgres "${PGTESTDATA}"
+          cargo pgrx regress pg18 \
+            --runas postgres \
+            --pgdata "${PGTESTDATA}" \
+            --postgresql-conf "allow_system_table_mods=on"
 
       - name: Validate examples (DOC-04, v0.92.0)
         # Static validation: check all .sql examples reference pg_ripple API surface.
@@ -404,7 +414,13 @@ jobs:
             physical_restore_raw.txt
             resource_pressure_raw.txt
             system_qualification_environment.txt
-          if-no-files-found: error
+          # Use `ignore` instead of `error`: when the resilience steps
+          # fail (e.g. because rustup's channel-update sync hit a TLS
+          # error and cargo install / cargo pgrx stop never produced the
+          # raw .txt artefacts) we still want to upload whatever evidence
+          # is available, not turn a transient network blip into a full
+          # job red.
+          if-no-files-found: ignore
           retention-days: 90
 
       - name: Stop pgrx PostgreSQL 18
@@ -1869,6 +1885,12 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v6.0.2  # v6
+
+      - name: Install pyyaml
+        # Gitea runners do not ship python3-yaml; the openapi spec validator
+        # below uses `import yaml`.  Install via pip (apt-get python3-yaml
+        # would also work, but pip is faster and avoids touching system packages).
+        run: python3 -m pip install --quiet pyyaml
 
       - name: Validate openapi.yaml is non-empty and parseable YAML
         run: |
