@@ -161,6 +161,6 @@ pg_ripple 不在其数据表中存储原始字符串。每个 IRI、空节点和
 
 ## 下一步
 
-- [存储知识](stores-knowledge.md) — 使用三元组进行数据建模
-- [加载数据](loading-data.md) — 所有导入格式和方法
-- [使用 SPARQL 查询](querying-with-sparql.md) — 完整的查询语言
+- [存储知识](../features/storing-knowledge.md) — 使用三元组进行数据建模
+- [加载数据](../features/loading-data.md) — 所有导入格式和方法
+- [使用 SPARQL 查询](../features/querying-with-sparql.md) — 完整的查询语言

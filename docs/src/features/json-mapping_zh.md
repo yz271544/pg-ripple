@@ -163,5 +163,5 @@ SELECT pg_ripple.disable_json_writeback('contacts');
 - [JSON-LD 反向映射博客文章](https://github.com/trickle-labs/pg-ripple/blob/main/blog/json-ld-reverse-mapping.md)
 - [JSON 回写，以及使其实际工作所需的努力](https://github.com/trickle-labs/pg-ripple/blob/main/blog/json-writeback-correctness.md)
 - [GUC 参考：json_writeback_batch_size](../reference/guc-reference.md#pg_ripplejson_writeback_batch_size)
-- [HTTP API 参考](reference/http-api.md#json-mapping-writeback)
+- [HTTP API 参考](../reference/http-api.md#json-mapping-writeback)
 - [R2RML 用于复杂 ETL](r2rml.md)
