@@ -650,6 +650,22 @@ mod lib_tests;
 pub mod pg_test {
     pub fn setup(_options: Vec<&str>) {}
     pub fn postgresql_conf_options() -> Vec<&'static str> {
-        vec!["allow_system_table_mods = on"]
+        // The shared-memory encode cache is initialised only when
+        // pg_ripple is loaded via `shared_preload_libraries` (see
+        // `_PG_init` in src/lib.rs).  Without it, `encode_cache_insert`
+        // / `encode_cache_lookup` are no-ops and the v0.129.0 stale-cache
+        // regression test (`pg_test_load_rdfxml_file_populates_dictionary`)
+        // cannot exercise the actual fix.  Gitea/Ubuntu pgrx runners
+        // don't load the extension through shared_preload_libraries by
+        // default, so we set it explicitly here.
+        //
+        // Side effects are minimal: the merge / CDC / ExecutorEnd hooks
+        // register but stay quiescent — the latch trigger threshold is
+        // 10 000 delta rows (src/gucs/storage.rs) and pg_test never
+        // accumulates that many triples in a single transaction.
+        vec![
+            "allow_system_table_mods = on",
+            "shared_preload_libraries = 'pg_ripple'",
+        ]
     }
 }
