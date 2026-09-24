@@ -99,7 +99,10 @@ jobs:
           fi
 
       - name: Initialise pgrx (PostgreSQL 18)
-        run: cargo pgrx init --pg18 /usr/lib/postgresql/18/bin/pg_config
+        # Root-safe bootstrap: wrapper pg_ctl/initdb (re-exec as postgres
+        # under root) + PGRX_HOME env + config.toml against the wrapper
+        # pg_config.  See .github/actions/setup-pgrx-root.
+        uses: ./.github/actions/setup-pgrx-root
 
       - name: Install pg_ripple candidate
         run: cargo pgrx install --pg-config /usr/lib/postgresql/18/bin/pg_config
@@ -108,16 +111,27 @@ jobs:
         run: cargo pgrx start pg18 --postgresql-conf "shared_preload_libraries=pg_ripple"
 
       - name: Run migration chain test
+        # test_migration_chain.sh resolves its host from PGRX_HOME (set by
+        # the setup action) and connects as the OS user — the wrapper
+        # initdb named the bootstrap superuser after this OS user.
         run: bash tests/test_migration_chain.sh
 
       - name: Compare fresh and upgraded schema fingerprints
+        # schema_fingerprint.sh resolves its host from PGRX_HOST (not
+        # PGRX_HOME), so map it explicitly here.
+        env:
+          PGRX_HOST: ${{ runner.temp }}/pgrx-home
         run: bash tests/schema_fingerprint.sh
 
       - name: Run upgrade recovery test
         env:
           PG_RIPPLE_RESILIENCE_REQUIRE_SIGKILL: "1"
         run: |
-          export PATH="/usr/lib/postgresql/18/bin:$PATH"
+          # Wrapper bindir first: the script calls pg_ctl directly for the
+          # SIGKILL restart verification, and pg_ctl refuses to run as root.
+          export PATH="${PGRX_BINDIR}:/usr/lib/postgresql/18/bin:$PATH"
+          export PGHOST="${PGRX_HOME}"
+          export PGPORT=28818
           bash tests/upgrade_recovery.sh
 
       - name: Stop pgrx PostgreSQL 18

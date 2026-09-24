@@ -236,19 +236,19 @@ jobs:
           fi
 
       - name: Initialise pgrx (PostgreSQL 18)
-        run: cargo pgrx init --pg18 /usr/lib/postgresql/18/bin/pg_config
+        uses: ./.github/actions/setup-pgrx-root
 
       - name: Run pg_regress suite
         run: |
-          # Same root-vs-postgres workaround as the `test` job: pgrx delegates
-          # initdb/postgres to the requested system user, and PostgreSQL
-          # refuses to initialise a cluster as root.  Use an absolute pgdata
-          # path because pgrx changes directory while running initdb.
-          PGTESTDATA="${GITHUB_WORKSPACE}/target/regress-pgdata"
-          sudo install -d -o postgres -g postgres "${PGTESTDATA}"
+          # cargo-pgrx 0.18.0 manages the pgrx-home instance itself for
+          # regress: its run machinery shells out to $bindir/initdb and
+          # $bindir/pg_ctl and ignores --pgdata/--runas for the server
+          # (the From<&Regress> for Run conversion drops both; --runas only
+          # reaches dropdb/createdb).  The root-safe wrappers installed by
+          # the setup action make that machinery start the server as the
+          # postgres system user, with a bootstrap superuser named after
+          # this OS user, so the regress connections work unchanged.
           cargo pgrx regress pg18 \
-            --runas postgres \
-            --pgdata "${PGTESTDATA}" \
             --postgresql-conf "allow_system_table_mods=on"
 
       - name: Validate examples (DOC-04, v0.92.0)
@@ -270,6 +270,9 @@ jobs:
       # shutdown path).
       - name: pg_ripple_http process smoke test
         run: |
+          export PATH="/usr/lib/postgresql/18/bin:$PATH"
+          # The setup action's wrapper initdb names the bootstrap superuser
+          # after this OS user, so user=${USER} connects with trust auth.
           psql "host=localhost port=28818 dbname=postgres user=${USER}" \
             -c "CREATE EXTENSION IF NOT EXISTS pg_ripple;"
           psql "host=localhost port=28818 dbname=postgres user=${USER}" \
@@ -356,7 +359,7 @@ jobs:
           fi
 
       - name: Initialise pgrx (PostgreSQL 18)
-        run: cargo pgrx init --pg18 /usr/lib/postgresql/18/bin/pg_config
+        uses: ./.github/actions/setup-pgrx-root
 
       - name: Install pg_ripple candidate
         run: cargo pgrx install --pg-config /usr/lib/postgresql/18/bin/pg_config
@@ -365,9 +368,17 @@ jobs:
         run: cargo pgrx start pg18 --postgresql-conf "shared_preload_libraries=pg_ripple"
 
       - name: Run migration chain test
-        run: bash tests/test_migration_chain.sh
+        run: |
+          # test_migration_chain.sh resolves its host from PGRX_HOME (set by
+          # the setup action) and connects as the OS user — the wrapper
+          # initdb named the bootstrap superuser after this OS user.
+          bash tests/test_migration_chain.sh
 
       - name: Compare fresh and upgraded schema fingerprints
+        # schema_fingerprint.sh resolves its host from PGRX_HOST (not
+        # PGRX_HOME), so map it explicitly here.
+        env:
+          PGRX_HOST: ${{ runner.temp }}/pgrx-home
         run: bash tests/schema_fingerprint.sh
 
       - name: Run upgrade recovery test
@@ -375,7 +386,11 @@ jobs:
           PG_RIPPLE_RESILIENCE_REQUIRE_SIGKILL: "1"
         run: |
           set -o pipefail
-          export PATH="/usr/lib/postgresql/18/bin:$PATH"
+          # Wrapper bindir first: the script calls pg_ctl directly for the
+          # SIGKILL restart verification, and pg_ctl refuses to run as root.
+          export PATH="${PGRX_BINDIR}:/usr/lib/postgresql/18/bin:$PATH"
+          export PGHOST="${PGRX_HOME}"
+          export PGPORT=28818
           bash tests/upgrade_recovery.sh 2>&1 | tee upgrade_recovery_raw.txt
 
       - name: Run physical restore and resource-pressure qualification
@@ -386,14 +401,23 @@ jobs:
           PG_RIPPLE_RUN_RESOURCE_PRESSURE: "1"
         run: |
           set -o pipefail
-          export PATH="/usr/lib/postgresql/18/bin:$PATH"
-          export PGHOST="$HOME/.pgrx"
+          export PATH="${PGRX_BINDIR}:/usr/lib/postgresql/18/bin:$PATH"
+          export PGHOST="${PGRX_HOME}"
           export PGPORT=28818
           export PGUSER="$USER"
           psql -X -v ON_ERROR_STOP=1 -d postgres \
             -c 'CREATE EXTENSION IF NOT EXISTS pg_ripple CASCADE'
-          export PGDATA="$HOME/.pgrx/data-18"
-          bash tests/resilience/physical_backup_restore.sh \
+          export PGDATA="${PGRX_HOME}/data-18"
+          # physical_backup_restore.sh takes a base backup and starts
+          # restored clusters from it: pg_basebackup artifacts must be
+          # owned by the same user that will run the restored servers, so
+          # run the whole script as the postgres system user (its pg_ctl
+          # calls pass through the wrappers unchanged; PGUSER=postgres is
+          # the bootstrap superuser in this context).
+          sudo -u postgres env \
+            PATH="${PGRX_BINDIR}:/usr/lib/postgresql/18/bin:$PATH" \
+            PGHOST="${PGRX_HOME}" PGPORT=28818 PGUSER=postgres \
+            bash tests/resilience/physical_backup_restore.sh \
             2>&1 | tee physical_restore_raw.txt
           bash tests/resilience/resource_pressure.sh \
             2>&1 | tee resource_pressure_raw.txt
@@ -490,7 +514,7 @@ jobs:
           fi
 
       - name: Initialise pgrx (PostgreSQL 18)
-        run: cargo pgrx init --pg18 /usr/lib/postgresql/18/bin/pg_config
+        uses: ./.github/actions/setup-pgrx-root
 
       - name: Fetch W3C SPARQL 1.1 test suite
         if: steps.w3c-cache.outputs.cache-hit != 'true'
@@ -507,7 +531,6 @@ jobs:
           PGHOST: localhost
           PGPORT: "28818"
           PGDATABASE: postgres
-          PGUSER: runner
           REQUIRE_CONFORMANCE: "1"
         run: cargo test --test w3c_smoke -- --nocapture
 
@@ -579,7 +602,7 @@ jobs:
           fi
 
       - name: Initialise pgrx (PostgreSQL 18)
-        run: cargo pgrx init --pg18 /usr/lib/postgresql/18/bin/pg_config
+        uses: ./.github/actions/setup-pgrx-root
 
       - name: Fetch W3C SPARQL 1.1 test suite
         if: steps.w3c-cache.outputs.cache-hit != 'true'
@@ -596,7 +619,6 @@ jobs:
           PGHOST: localhost
           PGPORT: "28818"
           PGDATABASE: postgres
-          PGUSER: runner
           REQUIRE_CONFORMANCE: "1"
         run: cargo test --test w3c_suite -- --nocapture
 
@@ -683,7 +705,7 @@ jobs:
           fi
 
       - name: Initialise pgrx (PostgreSQL 18)
-        run: cargo pgrx init --pg18 /usr/lib/postgresql/18/bin/pg_config
+        uses: ./.github/actions/setup-pgrx-root
 
       - name: Fetch Jena SPARQL test suite
         if: steps.jena-cache.outputs.cache-hit != 'true'
@@ -700,7 +722,6 @@ jobs:
           PGHOST: localhost
           PGPORT: "28818"
           PGDATABASE: postgres
-          PGUSER: runner
           JENA_THREADS: "1"
         run: cargo test --test jena_suite -- --nocapture
 
@@ -788,7 +809,7 @@ jobs:
           fi
 
       - name: Initialise pgrx (PostgreSQL 18)
-        run: cargo pgrx init --pg18 /usr/lib/postgresql/18/bin/pg_config
+        uses: ./.github/actions/setup-pgrx-root
 
       - name: Start pgrx PostgreSQL 18
         run: cargo pgrx start pg18 --postgresql-conf "allow_system_table_mods=on"
@@ -801,7 +822,6 @@ jobs:
           PGHOST: localhost
           PGPORT: "28818"
           PGDATABASE: postgres
-          PGUSER: runner
           WATDIV_THREADS: "8"
         run: cargo test --test watdiv_suite -- --nocapture
 
@@ -874,7 +894,7 @@ jobs:
           fi
 
       - name: Initialise pgrx (PostgreSQL 18)
-        run: cargo pgrx init --pg18 /usr/lib/postgresql/18/bin/pg_config
+        uses: ./.github/actions/setup-pgrx-root
 
       - name: Start pgrx PostgreSQL 18
         run: cargo pgrx start pg18 --postgresql-conf "allow_system_table_mods=on"
@@ -887,7 +907,6 @@ jobs:
           PGHOST: localhost
           PGPORT: "28818"
           PGDATABASE: postgres
-          PGUSER: runner
           LUBM_REQUIRE_DB: "1"
         run: cargo test --test lubm_suite -- --nocapture
 
@@ -1014,7 +1033,7 @@ jobs:
         run: cargo install cargo-pgrx --version "=0.18.0" --locked
 
       - name: Initialise pgrx for PostgreSQL 18
-        run: cargo pgrx init --pg18 /usr/lib/postgresql/18/bin/pg_config
+        uses: ./.github/actions/setup-pgrx-root
 
       - name: Build and install pg_ripple for PG18
         run: cargo pgrx install --pg-config /usr/lib/postgresql/18/bin/pg_config
@@ -1025,7 +1044,7 @@ jobs:
       - name: Wait for PostgreSQL 18
         run: |
           for attempt in {1..60}; do
-            if psql -h localhost -p 28818 -U runner -d postgres \
+            if psql -h localhost -p 28818 -U "$(id -un)" -d postgres \
               -c "SELECT 1" >/dev/null 2>&1; then
               exit 0
             fi
@@ -1036,8 +1055,10 @@ jobs:
 
       - name: Create entailment test database
         run: |
-          createdb -h localhost -p 28818 -U runner pg_ripple
-          psql -h localhost -p 28818 -U runner -d pg_ripple \
+          # The setup action's wrapper initdb named the bootstrap superuser
+          # after this OS user ("runner" on GitHub, "root" on Gitea).
+          createdb -h localhost -p 28818 -U "$(id -un)" pg_ripple
+          psql -h localhost -p 28818 -U "$(id -un)" -d pg_ripple \
             -c "CREATE EXTENSION pg_ripple;"
 
       - name: Run SPARQL entailment regime suite
@@ -1101,7 +1122,7 @@ jobs:
           fi
 
       - name: Initialise pgrx (PostgreSQL 18)
-        run: cargo pgrx init --pg18 /usr/lib/postgresql/18/bin/pg_config
+        uses: ./.github/actions/setup-pgrx-root
 
       - name: Start pgrx PostgreSQL 18
         run: cargo pgrx start pg18 --postgresql-conf "allow_system_table_mods=on"
@@ -1114,7 +1135,6 @@ jobs:
           PGHOST: localhost
           PGPORT: "28818"
           PGDATABASE: postgres
-          PGUSER: runner
         run: cargo test --test datalog_convergence_suite -- --nocapture
 
       - name: Stop pgrx PostgreSQL 18
@@ -1234,7 +1254,7 @@ jobs:
           fi
 
       - name: Initialise pgrx (PostgreSQL 18)
-        run: cargo pgrx init --pg18 /usr/lib/postgresql/18/bin/pg_config
+        uses: ./.github/actions/setup-pgrx-root
 
       - name: Install pg_ripple
         run: cargo pgrx install --pg-config /usr/lib/postgresql/18/bin/pg_config
@@ -1247,7 +1267,6 @@ jobs:
           PGHOST: localhost
           PGPORT: "28818"
           PGDATABASE: postgres
-          PGUSER: runner
         run: |
           set -o pipefail
           psql -X -v ON_ERROR_STOP=1 -v scale=59 \
@@ -1518,19 +1537,23 @@ jobs:
             cargo install cargo-pgrx --version "=${{ env.PGRX_VERSION }}" --locked
           fi
 
+      # Root-safe bootstrap (wrapper pg_ctl/initdb + PGRX_HOME env; see
+      # .github/actions/setup-pgrx-root): on root runners cargo pgrx init
+      # only writes config.toml, and the wrapped start brings the server up
+      # as the postgres system user with a superuser named after the OS user.
       - name: Build and install extension
+        uses: ./.github/actions/setup-pgrx-root
+
+      - name: Start instance and install extension
         run: |
-          PG_CONFIG=/usr/lib/postgresql/18/bin/pg_config
-          cargo pgrx init --pg18 "$PG_CONFIG"
           cargo pgrx start pg18 --postgresql-conf "allow_system_table_mods=on"
-          cargo pgrx install --pg-config "$PG_CONFIG"
+          cargo pgrx install --pg-config /usr/lib/postgresql/18/bin/pg_config
 
       - name: Verify feature_status() evidence paths exist
         env:
           PGHOST: localhost
           PGPORT: "28818"
           PGDATABASE: postgres
-          PGUSER: runner
         run: |
           psql -c "CREATE EXTENSION IF NOT EXISTS pg_ripple;" 2>&1
           # GATE-05: Collect all missing paths in a variable to avoid the
@@ -1609,19 +1632,23 @@ jobs:
             cargo install cargo-pgrx --version "=${{ env.PGRX_VERSION }}" --locked
           fi
 
+      # Root-safe bootstrap (wrapper pg_ctl/initdb + PGRX_HOME env; see
+      # .github/actions/setup-pgrx-root): on root runners cargo pgrx init
+      # only writes config.toml, and the wrapped start brings the server up
+      # as the postgres system user with a superuser named after the OS user.
       - name: Build and install extension
+        uses: ./.github/actions/setup-pgrx-root
+
+      - name: Start instance and install extension
         run: |
-          PG_CONFIG=/usr/lib/postgresql/18/bin/pg_config
-          cargo pgrx init --pg18 "$PG_CONFIG"
           cargo pgrx start pg18 --postgresql-conf "allow_system_table_mods=on"
-          cargo pgrx install --pg-config "$PG_CONFIG"
+          cargo pgrx install --pg-config /usr/lib/postgresql/18/bin/pg_config
 
       - name: Populate database and validate feature_status()
         env:
           PGHOST: localhost
           PGPORT: "28818"
           PGDATABASE: postgres
-          PGUSER: runner
         run: |
           psql -c "CREATE EXTENSION IF NOT EXISTS pg_ripple;" 2>&1
 
@@ -1719,19 +1746,23 @@ jobs:
             cargo install cargo-pgrx --version "=${{ env.PGRX_VERSION }}" --locked
           fi
 
+      # Root-safe bootstrap (wrapper pg_ctl/initdb + PGRX_HOME env; see
+      # .github/actions/setup-pgrx-root): on root runners cargo pgrx init
+      # only writes config.toml, and the wrapped start brings the server up
+      # as the postgres system user with a superuser named after the OS user.
       - name: Build and install extension
+        uses: ./.github/actions/setup-pgrx-root
+
+      - name: Start instance and install extension
         run: |
-          PG_CONFIG=/usr/lib/postgresql/18/bin/pg_config
-          cargo pgrx init --pg18 "$PG_CONFIG"
           cargo pgrx start pg18 --postgresql-conf "allow_system_table_mods=on"
-          cargo pgrx install --pg-config "$PG_CONFIG"
+          cargo pgrx install --pg-config /usr/lib/postgresql/18/bin/pg_config
 
       - name: Run Arrow Flight export integration test
         env:
           PGHOST: localhost
           PGPORT: "28818"
           PGDATABASE: postgres
-          PGUSER: runner
         run: |
           # Create extension and load sample data.
           psql -c "CREATE EXTENSION IF NOT EXISTS pg_ripple;" 2>&1
@@ -1888,9 +1919,14 @@ jobs:
 
       - name: Install pyyaml
         # Gitea runners do not ship python3-yaml; the openapi spec validator
-        # below uses `import yaml`.  Install via pip (apt-get python3-yaml
-        # would also work, but pip is faster and avoids touching system packages).
-        run: python3 -m pip install --quiet pyyaml
+        # below uses `import yaml`.  Ubuntu 24.04 marks the system Python as
+        # externally managed (PEP 668), so plain `pip install` is rejected —
+        # use --break-system-packages in the throwaway CI container, with an
+        # apt fallback for images where pip is unavailable entirely.
+        run: |
+          python3 -c "import yaml" 2>/dev/null && exit 0
+          python3 -m pip install --quiet --break-system-packages pyyaml \
+            || sudo apt-get install -y --no-install-recommends python3-yaml
 
       - name: Validate openapi.yaml is non-empty and parseable YAML
         run: |

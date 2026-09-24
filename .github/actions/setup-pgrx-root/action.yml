@@ -1,0 +1,112 @@
+name: Set up root-safe pgrx instance
+description: >-
+  Bootstrap a pgrx-managed PostgreSQL 18 instance on runners whose steps run
+  as root (Gitea Actions Ubuntu images). The postgres server binary, pg_ctl,
+  and initdb all refuse to run as root, and cargo-pgrx 0.18.0 shells out to
+  $bindir/pg_ctl and $bindir/initdb without runas support for start/stop
+  (`cargo pgrx init` merely skips initdb when it detects root). This action
+  wraps pg_ctl/initdb so they re-exec via `sudo -u postgres` when invoked by
+  root, re-points `pg_config --bindir` at the wrapper dir so cargo-pgrx
+  resolves pg_ctl/initdb (and psql/createdb) there, points PGRX_HOME at a
+  directory the server can write, and runs `cargo pgrx init` through the
+  wrapper pg_config. On root runners the cluster is also inited with a
+  superuser role named after the current OS user so later psql/createdb
+  steps keep working. On non-root runners everything passes through
+  unchanged (same behavior as before).
+
+inputs:
+  pg-config:
+    description: Path to the real pg_config binary
+    required: false
+    default: /usr/lib/postgresql/18/bin/pg_config
+
+outputs:
+  pgrx-home:
+    description: PGRX_HOME used for this job (config.toml, data-18, sockets, logs)
+    value: ${{ steps.envs.outputs.pgrx-home }}
+  pgrx-bindir:
+    description: Wrapper bindir (prepend to PATH for bare pg_ctl/initdb callers)
+    value: ${{ steps.envs.outputs.pgrx-bindir }}
+
+runs:
+  using: composite
+  steps:
+    - name: Record pgrx home and wrapper bindir
+      id: envs
+      shell: bash
+      run: |
+        # RUNNER_TEMP is fresh per job and outside the cached target/ dir, so
+        # no stale postgres-owned state leaks in via the cargo build cache.
+        echo "pgrx-home=${RUNNER_TEMP}/pgrx-home" >> "$GITHUB_OUTPUT"
+        echo "pgrx-bindir=${RUNNER_TEMP}/pgrx-bindir" >> "$GITHUB_OUTPUT"
+        {
+          echo "PGRX_HOME=${RUNNER_TEMP}/pgrx-home"
+          echo "PGRX_BINDIR=${RUNNER_TEMP}/pgrx-bindir"
+        } >> "$GITHUB_ENV"
+
+    - name: Build root-safe pg_ctl/initdb wrappers
+      shell: bash
+      run: |
+        set -euo pipefail
+        PG_BIN_DIR="$(dirname "${{ inputs.pg-config }}")"
+
+        # PGRX_HOME holds config.toml (written by cargo pgrx init as the
+        # current user), the data-18 cluster (written by the wrapped initdb
+        # as the postgres system user), unix sockets, and the server log.
+        # Mode 777 lets both identities write; data-18 ownership follows
+        # whoever ran initdb.
+        sudo install -d -m 777 "${PGRX_HOME}"
+        sudo install -d "${PGRX_BINDIR}"
+
+        # Symlink every real binary except the three we wrap.
+        for b in "${PG_BIN_DIR}"/*; do
+          name="$(basename "$b")"
+          case "$name" in pg_ctl|initdb|pg_config) continue ;; esac
+          ln -sf "$b" "${PGRX_BINDIR}/${name}"
+        done
+
+        # initdb wrapper: re-exec as the postgres system user when root, and
+        # name the bootstrap superuser after the current OS user so that
+        # psql/createdb run as the runner user keep working (role "root" on
+        # Gitea, "runner" on GitHub-hosted runners). On non-root runners
+        # this passes through unchanged.
+        cat > "${PGRX_BINDIR}/initdb" <<EOF
+        #!/bin/bash
+        if [ "\$(id -u)" = "0" ]; then
+          exec sudo -u postgres ${PG_BIN_DIR}/initdb "\$@" --username="$(id -un)"
+        fi
+        exec ${PG_BIN_DIR}/initdb "\$@"
+        EOF
+        chmod 755 "${PGRX_BINDIR}/initdb"
+
+        # pg_ctl wrapper: only needs the postgres identity (status reads the
+        # pid file; start/stop spawn/signal the server).
+        cat > "${PGRX_BINDIR}/pg_ctl" <<EOF
+        #!/bin/bash
+        if [ "\$(id -u)" = "0" ]; then
+          exec sudo -u postgres ${PG_BIN_DIR}/pg_ctl "\$@"
+        fi
+        exec ${PG_BIN_DIR}/pg_ctl "\$@"
+        EOF
+        chmod 755 "${PGRX_BINDIR}/pg_ctl"
+
+        # pg_config wrapper: report the wrapper bindir so cargo-pgrx resolves
+        # pg_ctl/initdb (and psql/createdb) here instead of the real bindir.
+        # Every other flag passes through to the real pg_config.
+        cat > "${PGRX_BINDIR}/pg_config" <<EOF
+        #!/bin/bash
+        if [ "\$1" = "--bindir" ]; then
+          echo "${PGRX_BINDIR}"
+          exit 0
+        fi
+        exec ${PG_BIN_DIR}/pg_config "\$@"
+        EOF
+        chmod 755 "${PGRX_BINDIR}/pg_config"
+
+        # Register pg18 in $PGRX_HOME/config.toml against the wrapper
+        # pg_config. As root, cargo pgrx init skips initdb entirely (it
+        # prints "Skipping initdb as current user is root user") and only
+        # writes config.toml — the actual cluster is created later by the
+        # wrapped initdb when `cargo pgrx start` / `cargo pgrx regress` /
+        # `cargo pgrx test` first need it.
+        cargo pgrx init --pg18 "${PGRX_BINDIR}/pg_config"
