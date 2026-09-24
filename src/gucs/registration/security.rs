@@ -106,7 +106,14 @@ pub fn register() {
       When empty (default), ALL paths are denied (PT403 default-deny policy). (v0.55.0)",
         c"",
         &COPY_RDF_ALLOWED_PATHS,
-        GucContext::Sighup,
+        // SuSet (not Sighup): superusers may relax the allowlist per session
+        // (the docs/gucs.md table already documented this GUC as Suset),
+        // while non-superusers still cannot change it.  Sighup made even
+        // `SET` from a superuser session fail with "cannot be changed now",
+        // which broke the pg_test_load_rdfxml_file_populates_dictionary
+        // regression test after v0.136.0 wired shared_preload_libraries
+        // into the pg_test framework.
+        GucContext::Suset,
         GucFlags::default(),
     );
 
