@@ -1,16 +1,22 @@
 -- pg_regress test: vector setup (v0.27.0)
 -- Checks pgvector availability and skips remaining vector tests gracefully.
 -- This test must pass in all CI environments, including those without pgvector.
-
-SET client_min_messages = warning;
+--
+-- The output below is deterministic whether or not the extension already
+-- exists in the regression database: client_min_messages is lowered before
+-- the extension/library load so the one-time _PG_init "loaded without
+-- shared_preload_libraries" WARNING can never leak into the transcript at a
+-- position that depends on which statement first loads the library.
+SET client_min_messages = error;
 CREATE EXTENSION IF NOT EXISTS pg_ripple;
+-- Force the pg_ripple shared library to load in this session so that GUC
+-- registrations become visible in pg_settings.  When the extension is
+-- already installed, CREATE EXTENSION is a no-op and the library is *not*
+-- loaded automatically until a pg_ripple function is first called.
+LOAD 'pg_ripple';
 SET client_min_messages = DEFAULT;
 SET search_path TO pg_ripple, public;
 
--- Force the pg_ripple shared library to load in this session so that GUC
--- registrations become visible in pg_settings.  When the extension is already
--- installed, CREATE EXTENSION is a no-op and the library is *not* loaded
--- automatically until a pg_ripple function is first called.
 SELECT pg_ripple.load_ntriples('') = 0 AS library_loaded;
 
 -- ── pgvector availability gate ────────────────────────────────────────────────
