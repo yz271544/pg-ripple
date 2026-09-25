@@ -2,7 +2,9 @@
 # Apply every migration discovered by scripts/migration_graph.py to a clean DB.
 set -euo pipefail
 
-PGRX_HOST="${PGRX_HOST:-${HOME}/.pgrx}"
+# The pgrx instance home may be exported as PGRX_HOME (setup-pgrx-root
+# composite action on Gitea) or PGRX_HOST (legacy); fall back to ~/.pgrx.
+PGRX_HOST="${PGRX_HOST:-${PGRX_HOME:-${HOME}/.pgrx}}"
 PGRX_PORT="${PGRX_PORT:-28818}"
 PGRX_USER="${PGRX_USER:-${USER}}"
 PSQL=(psql -h "${PGRX_HOST}" -p "${PGRX_PORT}" -U "${PGRX_USER}")

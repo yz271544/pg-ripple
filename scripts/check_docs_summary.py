@@ -5,6 +5,11 @@ scripts/check_docs_summary.py — A2 guardrail from plans/documentation-2.md
 Verifies that every .md file under docs/src/ (except SUMMARY.md itself and
 any files listed in the allowlist) is referenced exactly once in SUMMARY.md.
 
+Chinese translation pages (`*_zh.md`) are registered via SUMMARY_zh.md, whose
+links point at the English source paths (mdbook's zh build maps them to the
+`_zh.md` files).  A translation page is therefore not an orphan when its
+English source page is referenced in SUMMARY.md.
+
 Exit code:  0  = no orphans, no duplicates
             1  = orphans or duplicates found
 
@@ -81,18 +86,28 @@ def main() -> int:
 
     link_counts: Counter[Path] = Counter(summary_targets)
 
-    # Collect all .md files under docs/src/ (excluding SUMMARY.md and book output)
+    # Collect all .md files under docs/src/ (excluding SUMMARY.md, the zh
+    # summary index, and book output)
     all_pages: list[Path] = []
     for md in sorted(docs_src.rglob("*.md")):
         rel = md.relative_to(docs_src)
-        if rel.parts[0] in ("SUMMARY.md",) or str(rel) == "SUMMARY.md":
+        if str(rel) in ("SUMMARY.md", "SUMMARY_zh.md"):
             continue
         all_pages.append(rel)
 
-    # Filter allowlisted pages
-    checked_pages = [p for p in all_pages if str(p) not in ALLOWLIST]
+    # Filter allowlisted pages; treat translation pages as registered when
+    # their English source page is linked from SUMMARY.md (SUMMARY_zh.md
+    # links the English paths; the zh build maps them to *_zh.md).
+    def registered(rel: Path) -> bool:
+        if link_counts[rel] > 0:
+            return True
+        if rel.name.endswith("_zh.md"):
+            english = rel.with_name(rel.name[: -len("_zh.md")] + ".md")
+            return link_counts[english] > 0
+        return False
 
-    orphans = [p for p in checked_pages if link_counts[p] == 0]
+    checked_pages = [p for p in all_pages if str(p) not in ALLOWLIST]
+    orphans = [p for p in checked_pages if not registered(p)]
     duplicates = [p for p, cnt in link_counts.items() if cnt > 1]
 
     exit_code = 0

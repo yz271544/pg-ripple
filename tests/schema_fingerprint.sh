@@ -2,7 +2,7 @@
 # Compare a fresh install with the complete sequential upgrade path.
 set -euo pipefail
 
-PGHOST="${PGHOST:-${PGRX_HOST:-${HOME}/.pgrx}}"
+PGHOST="${PGHOST:-${PGRX_HOST:-${PGRX_HOME:-${HOME}/.pgrx}}}"
 PGPORT="${PGPORT:-${PGRX_PORT:-28818}}"
 PGUSER="${PGUSER:-${PGRX_USER:-$(whoami)}}"
 PSQL=(psql -X -v ON_ERROR_STOP=1 -h "$PGHOST" -p "$PGPORT" -U "$PGUSER")
