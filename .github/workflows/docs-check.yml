@@ -67,7 +67,7 @@ jobs:
             | tar -xz --directory=/usr/local/bin
 
       - name: Install mdbook-admonish
-        uses: dtolnay/rust-toolchain@stable  # stable
+        uses: ./.github/actions/setup-rust
 
       - name: Install admonish
         run: cargo install mdbook-admonish --locked

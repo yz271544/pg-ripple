@@ -38,7 +38,7 @@ jobs:
         uses: actions/checkout@v6.0.2  # v6
 
       - name: Install Rust (stable)
-        uses: dtolnay/rust-toolchain@stable  # stable
+        uses: ./.github/actions/setup-rust
         with:
           components: rustfmt, clippy
 
@@ -196,7 +196,7 @@ jobs:
         uses: actions/checkout@v6.0.2  # v6
 
       - name: Install Rust (stable)
-        uses: dtolnay/rust-toolchain@stable  # stable
+        uses: ./.github/actions/setup-rust
 
       - name: Cache Cargo registry
         uses: actions/cache@v5.0.5  # v5
@@ -319,7 +319,7 @@ jobs:
         uses: actions/checkout@v6.0.2  # v6
 
       - name: Install Rust (stable)
-        uses: dtolnay/rust-toolchain@stable  # stable
+        uses: ./.github/actions/setup-rust
 
       - name: Cache Cargo registry
         uses: actions/cache@v5.0.5  # v5
@@ -461,7 +461,7 @@ jobs:
         uses: actions/checkout@v6.0.2  # v6
 
       - name: Install Rust (stable)
-        uses: dtolnay/rust-toolchain@stable  # stable
+        uses: ./.github/actions/setup-rust
 
       - name: Cache Cargo registry
         uses: actions/cache@v5.0.5  # v5
@@ -549,7 +549,7 @@ jobs:
         uses: actions/checkout@v6.0.2  # v6
 
       - name: Install Rust (stable)
-        uses: dtolnay/rust-toolchain@stable  # stable
+        uses: ./.github/actions/setup-rust
 
       - name: Cache Cargo registry
         uses: actions/cache@v5.0.5  # v5
@@ -652,7 +652,7 @@ jobs:
         uses: actions/checkout@v6.0.2  # v6
 
       - name: Install Rust (stable)
-        uses: dtolnay/rust-toolchain@stable  # stable
+        uses: ./.github/actions/setup-rust
 
       - name: Cache Cargo registry
         uses: actions/cache@v5.0.5  # v5
@@ -769,7 +769,7 @@ jobs:
         uses: actions/checkout@v6.0.2  # v6
 
       - name: Install Rust (stable)
-        uses: dtolnay/rust-toolchain@stable  # stable
+        uses: ./.github/actions/setup-rust
 
       - name: Cache Cargo registry
         uses: actions/cache@v5.0.5  # v5
@@ -854,7 +854,7 @@ jobs:
         uses: actions/checkout@v6.0.2  # v6
 
       - name: Install Rust (stable)
-        uses: dtolnay/rust-toolchain@stable  # stable
+        uses: ./.github/actions/setup-rust
 
       - name: Cache Cargo registry
         uses: actions/cache@v5.0.5  # v5
@@ -925,7 +925,7 @@ jobs:
         uses: actions/checkout@v6.0.2  # v6
 
       - name: Install Rust (stable)
-        uses: dtolnay/rust-toolchain@stable  # stable
+        uses: ./.github/actions/setup-rust
 
       - name: Cache Cargo registry
         uses: actions/cache@v5.0.5  # v5
@@ -1004,7 +1004,7 @@ jobs:
         uses: actions/checkout@v6.0.2  # v6
 
       - name: Install Rust (stable)
-        uses: dtolnay/rust-toolchain@stable  # stable
+        uses: ./.github/actions/setup-rust
 
       - name: Cache Cargo registry
         uses: actions/cache@v5.0.5  # v5
@@ -1063,7 +1063,7 @@ jobs:
 
       - name: Run SPARQL entailment regime suite
         run: |
-          PGDATABASE=pg_ripple PGHOST=localhost PGPORT=28818 PGUSER=runner \
+          PGDATABASE=pg_ripple PGHOST=localhost PGPORT=28818 PGUSER="$(id -un)" \
             bash tests/sparql_entailment/runner.sh
           echo "Entailment suite complete"
 
@@ -1082,7 +1082,7 @@ jobs:
         uses: actions/checkout@v6.0.2  # v6
 
       - name: Install Rust (stable)
-        uses: dtolnay/rust-toolchain@stable  # stable
+        uses: ./.github/actions/setup-rust
 
       - name: Cache Cargo registry
         uses: actions/cache@v5.0.5  # v5
@@ -1151,7 +1151,7 @@ jobs:
         uses: actions/checkout@v6.0.2  # v6
 
       - name: Install Rust (stable)
-        uses: dtolnay/rust-toolchain@stable  # stable
+        uses: ./.github/actions/setup-rust
 
       - name: Cache Cargo registry
         uses: actions/cache@v5.0.5  # v5
@@ -1208,7 +1208,7 @@ jobs:
         uses: actions/checkout@v6.0.2  # v6
 
       - name: Install Rust (stable)
-        uses: dtolnay/rust-toolchain@stable  # stable
+        uses: ./.github/actions/setup-rust
 
       - name: Cache Cargo registry
         uses: actions/cache@v5.0.5  # v5
@@ -1261,6 +1261,14 @@ jobs:
 
       - name: Start pgrx PostgreSQL 18
         run: cargo pgrx start pg18 --postgresql-conf "shared_preload_libraries=pg_ripple"
+
+      - name: Create pg_ripple extension
+        # bsbm_load.sql runs raw SQL (no Rust test harness to install the
+        # extension), so create it explicitly in the target database.  The
+        # setup-pgrx-root wrapper names the bootstrap superuser after this
+        # OS user, so psql's default user works.
+        run: psql -X -v ON_ERROR_STOP=1 -h localhost -p 28818 -d postgres \
+          -c "CREATE EXTENSION IF NOT EXISTS pg_ripple CASCADE"
 
       - name: Load and run the adapted BSBM workload
         env:
@@ -1519,7 +1527,7 @@ jobs:
             /usr/lib/postgresql/18/lib
 
       - name: Set up Rust toolchain
-        uses: dtolnay/rust-toolchain@stable  # stable
+        uses: ./.github/actions/setup-rust
 
       - name: Cache cargo registry
         uses: actions/cache@v5.0.5  # v5
@@ -1614,7 +1622,7 @@ jobs:
             /usr/lib/postgresql/18/lib
 
       - name: Set up Rust toolchain
-        uses: dtolnay/rust-toolchain@stable  # stable
+        uses: ./.github/actions/setup-rust
 
       - name: Cache cargo registry
         uses: actions/cache@v5.0.5  # v5
@@ -1728,7 +1736,7 @@ jobs:
             /usr/lib/postgresql/18/lib
 
       - name: Set up Rust toolchain
-        uses: dtolnay/rust-toolchain@stable  # stable
+        uses: ./.github/actions/setup-rust
 
       - name: Cache cargo registry
         uses: actions/cache@v5.0.5  # v5
@@ -1860,7 +1868,7 @@ jobs:
         uses: actions/checkout@v6.0.2  # v6
 
       - name: Install Rust stable
-        uses: dtolnay/rust-toolchain@stable  # stable
+        uses: ./.github/actions/setup-rust
         with:
           toolchain: stable
 
