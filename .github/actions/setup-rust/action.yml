@@ -1,81 +1,145 @@
-name: Set up Rust toolchain
-description: >-
-  Ensure rustup and the requested toolchain are available.  The Gitea Actions
-  Ubuntu image ships cargo/rustc but not rustup, and direct connections from
-  the LAN to static.rust-lang.org are unreliable (curl 18 partial-file
-  failures), so this action installs rustup from the Aliyun mirror (with the
-  official URL as fallback) and configures RUSTUP_DIST_SERVER/RUSTUP_UPDATE_ROOT
-  so every subsequent toolchain and component download goes through the
-  mirror.  Replaces dtolnay/rust-toolchain, which hard-codes the official
-  download URL and failed on the Gitea runner.
-
+# setup-rust — self-hosted (Gitea) safe Rust bootstrap
+#
+# Replaces dtolnay/rust-toolchain.  That action hard-codes
+# static.rust-lang.org for the rustup-init download; from the Gitea LAN
+# the direct connection to that host is unreliable (observed: "curl: (18)
+# Transferred a partial file"), and the Aliyun mirror does not host
+# rustup-init at all (observed: 404).
+#
+# This action:
+#   1. bootstraps rustup when cargo is missing (the Gitea job containers
+#      ship no Rust toolchain at all), downloading rustup-init from a
+#      verified source list and executing it as an ELF binary,
+#   2. installs the channel pinned by rust-toolchain.toml (TOOLCHAIN-PIN-01)
+#      when present, otherwise the requested toolchain,
+#   3. probes which toolchain distribution mirror is actually reachable
+#      and pins it in GITHUB_ENV so every later rustup/cargo invocation
+#      (including toolchain auto-installs triggered by rust-toolchain.toml)
+#      uses the same mirror,
+#   4. adds the requested components to the installed toolchain.
+name: "Setup Rust (mirror-aware, self-hosted safe)"
+description: "Install rustup + the pinned toolchain with verified multi-source downloads; add components"
 inputs:
   toolchain:
-    description: "Toolchain to install (default is stable; fuzz uses nightly)"
-    required: false
-    default: stable
+    description: "Rust toolchain to install (stable by default; rust-toolchain.toml wins when present)"
+    default: "stable"
   components:
-    description: "Comma-separated rustup components to add (e.g. 'rustfmt, clippy' or 'rust-src')"
-    required: false
+    description: "Comma-separated rustup components to install (e.g. rustfmt, clippy, rust-src)"
     default: ""
 
 runs:
   using: composite
   steps:
-    - name: Ensure rustup and stable toolchain (mirror-first)
+    - name: Ensure rustup, pinned toolchain and components
       shell: bash
-      env:
-        RUSTUP_DIST_SERVER: https://mirrors.aliyun.com/rustup
-        RUSTUP_UPDATE_ROOT: https://mirrors.aliyun.com/rustup/rustup
       run: |
         set -o pipefail
         case "$(uname -m)" in
-          x86_64) target=x86_64-unknown-linux-gnu ;;
+          x86_64)  target=x86_64-unknown-linux-gnu ;;
           aarch64) target=aarch64-unknown-linux-gnu ;;
-          *) target="$(rustc -vV 2>/dev/null | awk '/host/ {print $2}')" ;;
+          *)       target="$(rustc -vV 2>/dev/null | awk '/host/ {print $2}')" ;;
         esac
+        CARGO_HOME="${CARGO_HOME:-$HOME/.cargo}"
+        RUSTUP_HOME="${RUSTUP_HOME:-$HOME/.rustup}"
+        export RUSTUP_HOME CARGO_HOME
+
+        # ------------------------------------------------------------------
+        # 0. requested toolchain: the rust-toolchain.toml pin wins
+        # ------------------------------------------------------------------
         TC="${{ inputs.toolchain }}"
         COMPONENTS="${{ inputs.components }}"
-
-        ensure_rustup() {
-          command -v rustup >/dev/null 2>&1 && return 0
-          echo "installing rustup from the mirror (target: $target)"
-          curl -fsSL --retry 5 --retry-connrefused \
-            "${RUSTUP_UPDATE_ROOT}/${target}/rustup-init" -o /tmp/rustup-init \
-            || curl -fsSL --retry 5 --retry-connrefused \
-            "https://static.rust-lang.org/rustup/dist/${target}/rustup-init" -o /tmp/rustup-init
-          sh /tmp/rustup-init -y --profile minimal --default-toolchain none
-          echo "${CARGO_HOME:-$HOME/.cargo}/bin" >> "$GITHUB_PATH"
-        }
-
-        # rust-toolchain.toml (TOOLCHAIN-PIN-01) pins builds to a specific
-        # stable release that the Gitea image ships preinstalled.  The
-        # default path (stable, no components) therefore needs no network at
-        # all.  rustup (fetched from the Aliyun mirror, official URL as
-        # fallback) is only invoked for non-stable toolchains or missing
-        # components; RUSTUP_DIST_SERVER routes any resulting downloads to
-        # the mirror.
-        if [ "$TC" = "stable" ] && [ -z "$COMPONENTS" ]; then
-          echo "using the preinstalled toolchain: $(rustc --version 2>/dev/null || echo 'rustc not found')"
-          exit 0
+        if [ "$TC" = "stable" ] && [ -f rust-toolchain.toml ]; then
+          pinned="$(sed -nE 's/^[[:space:]]*channel[[:space:]]*=[[:space:]]*"([^"]+)".*/\1/p' rust-toolchain.toml | head -1)"
+          if [ -n "$pinned" ]; then
+            echo "rust-toolchain.toml pins channel $pinned; installing that instead of the latest stable"
+            TC="$pinned"
+          fi
         fi
 
-        ensure_rustup
-        if [ "$TC" != "stable" ]; then
-          rustup toolchain install "$TC" --profile minimal
+        # ------------------------------------------------------------------
+        # 1. rustup itself (only when cargo is missing entirely)
+        # ------------------------------------------------------------------
+        if ! command -v cargo >/dev/null 2>&1 || ! command -v rustup >/dev/null 2>&1; then
+          echo "installing rustup (target: $target)"
+          # rustup-init is an ELF *binary* upstream -- it must be executed
+          # directly, never piped through `sh` (observed failure:
+          # "/tmp/rustup-init: 1: ELF: not found").
+          fetch_ok=0
+          for base in \
+            "https://static.rust-lang.org/rustup/dist" \
+            "https://rsproxy.cn/rustup/dist"; do
+            url="${base}/${target}/rustup-init"
+            echo "trying $url"
+            if curl -fL --retry 3 --retry-connrefused --retry-all-errors \
+                --connect-timeout 15 --max-time 600 -o /tmp/rustup-init "$url" \
+               && [ -s /tmp/rustup-init ] \
+               && head -c4 /tmp/rustup-init | grep -q "ELF"; then
+              chmod +x /tmp/rustup-init
+              if /tmp/rustup-init -y --profile minimal --default-toolchain none; then
+                fetch_ok=1
+                break
+              fi
+            else
+              echo "source failed or payload is not an ELF binary; trying the next one"
+            fi
+          done
+          if [ "$fetch_ok" -ne 1 ]; then
+            echo "error: every rustup-init source failed; check the runner's outbound network"
+            exit 1
+          fi
+          if [ -n "${GITHUB_PATH:-}" ]; then
+            echo "$CARGO_HOME/bin" >> "$GITHUB_PATH"
+          fi
+          export PATH="$CARGO_HOME/bin:$PATH"
         fi
-        for c in $(echo "$COMPONENTS" | tr ',' ' '); do
-          [ -n "$c" ] || continue
-          # rust-src is a component without a binary; check the component
-          # list instead of the PATH.
-          if [ "$c" = "rust-src" ]; then
-            rustup component list --toolchain "$TC" 2>/dev/null | grep -q "rust-src.*installed" \
-              || rustup component add "$c" -t "$TC"
-          elif ! command -v "$c" >/dev/null 2>&1; then
-            # Add to the active (pinned, rust-toolchain.toml) toolchain so
-            # we do not pull a second full toolchain; the download goes
-            # through RUSTUP_DIST_SERVER (mirror).
-            rustup component add "$c" || rustup component add "$c" -t "$TC"
+
+        # ------------------------------------------------------------------
+        # 2+3. install the toolchain.  The official distribution server is
+        #      tried first: it is the only source that keeps channel files
+        #      for older releases (mirrors routinely prune them, so the
+        #      rust-toolchain.toml pin, e.g. 1.95.0, only exists upstream).
+        #      Mirrors are probed afterwards as fallbacks for when the
+        #      direct connection misbehaves; whichever source installs
+        #      successfully is pinned in GITHUB_ENV so every later rustup/
+        #      cargo invocation keeps using it.
+        # ------------------------------------------------------------------
+        sources=("${RUSTUP_DIST_SERVER:-https://static.rust-lang.org}")
+        for base in \
+          "https://mirrors.aliyun.com/rustup" \
+          "https://rsproxy.cn/rustup" \
+          "https://mirrors.tuna.tsinghua.edu.cn/rustup"; do
+          url="${base}/dist/channel-rust-${TC}"
+          if curl -fsS -o /dev/null --max-time 10 "$url"; then
+            sources+=("$base")
+            echo "toolchain mirror probe OK: $url"
+          else
+            echo "toolchain mirror probe failed: $url"
           fi
         done
+
+        installed=0
+        for src in "${sources[@]}"; do
+          echo "installing toolchain $TC from $src"
+          if RUSTUP_DIST_SERVER="$src" RUSTUP_MAX_RETRIES=5 \
+              rustup toolchain install "$TC" --profile minimal; then
+            installed=1
+            break
+          fi
+          echo "install failed against $src; trying the next source"
+        done
+        if [ "$installed" -ne 1 ]; then
+          echo "error: toolchain $TC could not be installed from any source" >&2
+          exit 1
+        fi
+        if [ -n "${GITHUB_ENV:-}" ] && [ -n "$src" ] && \
+           [ "$src" != "${RUSTUP_DIST_SERVER:-https://static.rust-lang.org}" ]; then
+          echo "RUSTUP_DIST_SERVER=$src" >> "$GITHUB_ENV"
+        fi
+        rustup default "$TC"
+        for c in $(echo "$COMPONENTS" | tr ',' ' '); do
+          [ -n "$c" ] || continue
+          rustup component add "$c" --toolchain "$TC"
+        done
         rustup show active-toolchain
+        echo "rustc: $(rustc --version)"
+        echo "cargo: $(cargo --version)"

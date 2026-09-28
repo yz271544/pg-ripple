@@ -28,9 +28,8 @@ runs:
 
     # ── Rust toolchain ────────────────────────────────────────────────────
     - name: Install Rust (stable)
-      uses: dtolnay/rust-toolchain@master
+      uses: ./.github/actions/setup-rust
       with:
-        toolchain: stable
         components: clippy, rustfmt
 
     # ── Caching ───────────────────────────────────────────────────────────

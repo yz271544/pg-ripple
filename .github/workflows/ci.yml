@@ -1368,7 +1368,7 @@ jobs:
 
     steps:
       - uses: actions/checkout@v6.0.2  # v6
-      - uses: dtolnay/rust-toolchain@stable  # stable
+      - uses: ./.github/actions/setup-rust
       - name: Check for duplicate direct dependencies (advisory)
         run: |
           cargo tree --duplicates 2>&1 | tee /tmp/duplicates.txt || true
@@ -1430,7 +1430,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6.0.2  # v6
-      - uses: dtolnay/rust-toolchain@stable  # stable
+      - uses: ./.github/actions/setup-rust
       - name: Install cargo-license
         run: cargo install cargo-license --locked
       - name: Check all dependencies use allowed licences
