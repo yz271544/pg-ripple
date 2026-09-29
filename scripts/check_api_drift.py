@@ -117,6 +117,7 @@ def main() -> int:
         "flush_encode_cache",
         "grant_graph_permission",
         "group_concat_decode",
+        "numeric_type_code_spi",
         "revoke_graph_access",
         "revoke_graph_permission",
         "xsd_double_fmt",
