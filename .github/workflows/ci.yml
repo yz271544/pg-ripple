@@ -1266,9 +1266,11 @@ jobs:
         # bsbm_load.sql runs raw SQL (no Rust test harness to install the
         # extension), so create it explicitly in the target database.  The
         # setup-pgrx-root wrapper names the bootstrap superuser after this
-        # OS user, so psql's default user works.
-        run: psql -X -v ON_ERROR_STOP=1 -h localhost -p 28818 -d postgres \
-          -c "CREATE EXTENSION IF NOT EXISTS pg_ripple CASCADE"
+        # OS user, so psql's default user works.  Single line: a backslash
+        # line-continuation inside a YAML plain scalar gets folded into a
+        # literal argument (observed: role " -c" does not exist).
+        run: |
+          psql -X -v ON_ERROR_STOP=1 -h localhost -p 28818 -d postgres -c "CREATE EXTENSION IF NOT EXISTS pg_ripple CASCADE"
 
       - name: Load and run the adapted BSBM workload
         env:
