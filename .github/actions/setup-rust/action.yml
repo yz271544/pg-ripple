@@ -17,6 +17,9 @@
 #      (including toolchain auto-installs triggered by rust-toolchain.toml)
 #      uses the same mirror,
 #   4. adds the requested components to the installed toolchain.
+#   5. writes ~/.cargo/config.toml (CARGO_HOME) pointing the cargo registry
+#      at the Aliyun sparse mirror when the file does not exist yet — the
+#      self-hosted runners reach crates.io over a slow WAN route.
 name: "Setup Rust (mirror-aware, self-hosted safe)"
 description: "Install rustup + the pinned toolchain with verified multi-source downloads; add components"
 inputs:
@@ -30,6 +33,46 @@ inputs:
 runs:
   using: composite
   steps:
+    # ── Cargo registry mirror ────────────────────────────────────────
+    # Point the cargo registry at the Aliyun sparse mirror for faster
+    # dependency downloads on the self-hosted Gitea runners. The config is
+    # written once per job container as $CARGO_HOME/config.toml and never
+    # overwrites a config already baked into the runner image. Only
+    # `replace-with = 'aliyun'` takes effect; the other [source.*] blocks
+    # are standby fallbacks. Note: the repo-local .cargo/config.toml only
+    # sets [env]/[target], so the two files merge without conflict.
+    - name: Configure cargo registry mirror (Aliyun)
+      shell: bash
+      run: |
+        set -euo pipefail
+        CARGO_HOME="${CARGO_HOME:-$HOME/.cargo}"
+        CONFIG="$CARGO_HOME/config.toml"
+        mkdir -p "$CARGO_HOME"
+        if [ -f "$CONFIG" ]; then
+          echo "$CONFIG already exists; leaving it untouched"
+          exit 0
+        fi
+        cat > "$CONFIG" <<'EOF'
+        [source.crates-io]
+        # Fetch crates from the Aliyun mirror instead of crates.io; switch
+        # `replace-with` to a standby source below to fall back elsewhere.
+        replace-with = 'aliyun'
+        [source.aliyun]
+        registry = "sparse+https://mirrors.aliyun.com/crates.io-index/"
+        [source.ustc]
+        registry = "https://mirrors.ustc.edu.cn/crates.io-index"
+        [source.sjtu]
+        registry = "https://mirrors.sjtug.sjtu.edu.cn/git/crates.io-index/"
+        [source.tuna]
+        registry = "https://mirrors.tuna.tsinghua.edu.cn/git/crates.io-index.git"
+        [source.rustcc]
+        registry = "https://code.aliyun.com/rustcc/crates.io-index.git"
+        [http]
+        timeout = 30
+        check-revoke = false
+        EOF
+        echo "wrote $CONFIG (crates.io -> Aliyun sparse mirror)"
+
     - name: Ensure rustup, pinned toolchain and components
       shell: bash
       run: |
