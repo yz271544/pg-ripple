@@ -20,6 +20,12 @@
 #   5. writes ~/.cargo/config.toml (CARGO_HOME) pointing the cargo registry
 #      at the Aliyun sparse mirror when the file does not exist yet — the
 #      self-hosted runners reach crates.io over a slow WAN route.
+#   6. exports NODE_EXTRA_CA_CERTS pointing at the system CA bundle on Linux
+#      so Node-based actions (upload-artifact, cache) trust the internal CA
+#      that git/curl already trust — Node does not consult the system store
+#      by default (observed: artifact upload to the Gitea instance failed
+#      with "unable to verify the first certificate" while git over HTTPS
+#      succeeded in the same container).
 name: "Setup Rust (mirror-aware, self-hosted safe)"
 description: "Install rustup + the pinned toolchain with verified multi-source downloads; add components"
 inputs:
@@ -33,6 +39,24 @@ inputs:
 runs:
   using: composite
   steps:
+    # ── Node.js trust of the system CA bundle ────────────────────────
+    # Node-based actions (upload-artifact, cache) verify TLS against Node's
+    # bundled Mozilla roots and ignore the system store, so uploads to a
+    # Gitea instance behind an internal CA fail with "unable to verify the
+    # first certificate" even though git/curl in the same container
+    # succeed. Exporting NODE_EXTRA_CA_CERTS (Linux only, file-existence
+    # guarded — no-op on GitHub-hosted, macOS, and Windows runners) makes
+    # Node append the system bundle to its trusted roots. This must run
+    # before any upload/cache step, and setup-rust is the first step of
+    # every job that uses those actions.
+    - name: Trust system CA bundle in Node actions
+      shell: bash
+      run: |
+        if [ "$(uname -s)" = "Linux" ] && [ -f /etc/ssl/certs/ca-certificates.crt ]; then
+          echo "NODE_EXTRA_CA_CERTS=/etc/ssl/certs/ca-certificates.crt" >> "${GITHUB_ENV:-/dev/null}"
+          echo "exported NODE_EXTRA_CA_CERTS=/etc/ssl/certs/ca-certificates.crt"
+        fi
+
     # ── Cargo registry mirror ────────────────────────────────────────
     # Point the cargo registry at the Aliyun sparse mirror for faster
     # dependency downloads on the self-hosted Gitea runners. The config is
