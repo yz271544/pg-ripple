@@ -636,6 +636,20 @@ jobs:
             org.opencontainers.image.licenses=Apache-2.0
             org.opencontainers.image.documentation=https://github.com/trickle-labs/pg-ripple/blob/main/README.md
 
+      # Allow a registry-mirrored postgres runtime base (e.g. Harbor inside an
+      # air-gapped Gitea dind runner) via the repository/org variable
+      # PG_BASE_IMAGE; defaults to the digest-pinned Docker Hub base from the
+      # Dockerfile. Must be a bookworm variant — see Dockerfile.
+      - name: Resolve runtime base image
+        id: pgbase
+        run: |
+          if [ -n "${{ vars.PG_BASE_IMAGE }}" ]; then
+            echo "ref=${{ vars.PG_BASE_IMAGE }}" >> "$GITHUB_OUTPUT"
+            echo "Using mirrored base image: ${{ vars.PG_BASE_IMAGE }}"
+          else
+            echo "ref=postgres:18-bookworm@sha256:a10c981235b4f635e65df0cfb66a5598064628128505dbc6a3ed4ca303717521" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Build and push
         id: docker_push
         uses: docker/build-push-action@v7  # v7
@@ -644,6 +658,7 @@ jobs:
           push: true
           build-args: |
             PGRX_VERSION=${{ env.PGRX_VERSION }}
+            PG_BASE_IMAGE=${{ steps.pgbase.outputs.ref }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           # annotation-index links the GHCR manifest index to the public repo,

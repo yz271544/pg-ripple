@@ -23,6 +23,19 @@
 #   connections. Never set this in a production or otherwise reachable
 #   deployment. See docker/00-pg_hba.sh for details.
 
+# ── Runtime base image override (global scope: usable in FROM below) ─────────
+# PG_BASE_IMAGE lets registry-mirrored build environments (e.g. the Gitea
+# dind runner pulling from an internal Harbor) substitute the base without
+# forking this file:
+#   docker build --build-arg PG_BASE_IMAGE=harbor.example/ci/postgres:18-bookworm@sha256:... .
+# It must be declared before the first FROM — an ARG declared between stages
+# does NOT supply its default to the next FROM (BuildKit resolves the base
+# name to blank). The override MUST be a Debian bookworm variant of
+# postgres:18 — the alpine variant is musl-based and cannot run the
+# glibc-built pg_ripple.so and pg_ripple_http binaries produced in the
+# builder stage below.
+ARG PG_BASE_IMAGE=postgres:18-bookworm@sha256:a10c981235b4f635e65df0cfb66a5598064628128505dbc6a3ed4ca303717521
+
 # ── Build stage ───────────────────────────────────────────────────────────────
 # Build a fresh gosu binary from source using Go 1.26 (fixes all gosu stdlib
 # CVEs: CVE-2025-68121 CRITICAL + CVE-2026-32280/32281/32283 HIGH which are
@@ -158,7 +171,9 @@ RUN curl -fsSL \
     && make install
 
 # ── Runtime stage ─────────────────────────────────────────────────────────────
-FROM postgres:18-bookworm@sha256:a10c981235b4f635e65df0cfb66a5598064628128505dbc6a3ed4ca303717521
+# Base comes from the global ARG PG_BASE_IMAGE declared at the top of this
+# file (see the override notes there).
+FROM ${PG_BASE_IMAGE}
 
 LABEL org.opencontainers.image.source="https://github.com/trickle-labs/pg-ripple"
 LABEL org.opencontainers.image.description="PostgreSQL 18 with pg_ripple, pg_trickle, pg_tide, PostGIS, pgvector"
