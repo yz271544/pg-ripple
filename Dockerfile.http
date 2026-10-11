@@ -69,7 +69,7 @@ RUN mkdir -p src && printf '// workspace stub — not compiled in Dockerfile.htt
 
 RUN cat > /usr/local/cargo/config.toml <<EOF
 [source.crates-io]
-replace-with = 'aliyun'
+replace-with = 'ustc'
 [source.aliyun]
 registry = "sparse+https://mirrors.aliyun.com/crates.io-index/"
 [source.ustc]
