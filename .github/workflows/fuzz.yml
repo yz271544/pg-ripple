@@ -48,6 +48,18 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v6.0.2  # v6
 
+      # cargo-fuzz compiles with -Zsanitizer=address, which forces clang as
+      # the linker. GitHub-hosted ubuntu images preinstall clang, but the slim
+      # self-hosted Gitea runner images (runner-images:patched) do not
+      # (observed on task 1723: "error: linker `clang` not found" while
+      # compiling the fuzz build scripts).
+      - name: Install clang
+        run: |
+          if ! command -v clang >/dev/null 2>&1; then
+            sudo apt-get update -qq
+            sudo apt-get install -y --no-install-recommends clang lld
+          fi
+
       - name: Install Rust nightly (required for cargo-fuzz)
         uses: ./.github/actions/setup-rust
         with:
