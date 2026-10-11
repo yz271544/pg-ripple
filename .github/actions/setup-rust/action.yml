@@ -80,7 +80,7 @@ runs:
         [source.crates-io]
         # Fetch crates from the Aliyun mirror instead of crates.io; switch
         # `replace-with` to a standby source below to fall back elsewhere.
-        replace-with = 'aliyun'
+        replace-with = 'ustc'
         [source.aliyun]
         registry = "sparse+https://mirrors.aliyun.com/crates.io-index/"
         [source.ustc]
