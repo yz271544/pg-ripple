@@ -6,7 +6,7 @@
 //!
 //! # Functions
 //!
-//! - `create_tenant(name, graph_iri, quota_triples)` — create a PostgreSQL role
+//! - `create_tenant(tenant_name, graph_iri, quota_triples)` — create a PostgreSQL role
 //!   with RLS access to a named graph and optional triple quota enforcement.
 //! - `drop_tenant(name)` — revoke access and remove the trigger.
 //! - `tenant_stats()` — SRF returning per-tenant stats.
@@ -17,7 +17,7 @@ use pgrx::prelude::*;
 
 /// Create a new pg_ripple tenant.
 ///
-/// Creates a PostgreSQL role `pg_ripple_tenant_{tenant_name}`, maps it to
+/// Creates a PostgreSQL role `ripple_tenant_{tenant_name}`, maps it to
 /// a named graph via `grant_graph_access()`, creates a row in the
 /// `_pg_ripple.tenants` catalog table, and installs a quota-enforcing trigger
 /// if `quota_triples > 0`.
@@ -25,17 +25,16 @@ use pgrx::prelude::*;
 /// Requires superuser privileges.
 #[pg_extern(schema = "pg_ripple", name = "create_tenant")]
 pub fn create_tenant(tenant_name: &str, graph_iri: &str, quota_triples: default!(i64, "0")) {
-    // TENANT-NAME-01 (v0.82.0): Validate tenant name with ^[A-Za-z0-9_]{1,63}$ regex.
-    // Uppercase letters are now allowed; length capped at 63 (PostgreSQL identifier limit).
+    // Leave room for the role prefix within PostgreSQL's 63-byte identifier limit.
     if tenant_name.is_empty()
-        || tenant_name.len() > 63
+        || tenant_name.len() > 49
         || !tenant_name
             .chars()
             .all(|c| c.is_ascii_alphanumeric() || c == '_')
     {
         pgrx::error!(
             "PT701: create_tenant: invalid tenant name '{}'; \
-             use only ASCII letters, digits, and underscores (max 63 chars)",
+             use only ASCII letters, digits, and underscores (max 49 chars)",
             tenant_name
         );
     }
@@ -44,13 +43,14 @@ pub fn create_tenant(tenant_name: &str, graph_iri: &str, quota_triples: default!
         pgrx::error!("PT702: create_tenant: graph_iri must not be empty");
     }
 
-    let role_name = format!("pg_ripple_tenant_{tenant_name}");
+    // PostgreSQL reserves role names beginning with pg_, even for superusers.
+    let role_name = format!("ripple_tenant_{tenant_name}");
 
     // Create the role if it doesn't exist.
     let create_role_sql = format!(
         "DO $$ BEGIN \
            IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = '{role_name}') THEN \
-             CREATE ROLE {role_name} NOLOGIN; \
+             CREATE ROLE \"{role_name}\" NOLOGIN; \
            END IF; \
          END $$"
     );
@@ -105,7 +105,7 @@ pub fn drop_tenant(tenant_name: &str) {
         pgrx::error!("PT704: drop_tenant: tenant_name must not be empty");
     }
 
-    let role_name = format!("pg_ripple_tenant_{tenant_name}");
+    let role_name = format!("ripple_tenant_{tenant_name}");
 
     // Look up the graph IRI for this tenant.
     let graph_iri: Option<String> = Spi::get_one_with_args::<String>(
@@ -220,3 +220,52 @@ fn install_quota_trigger(tenant_name: &str, graph_iri: &str, quota_triples: i64)
 
 // ─── Internal helpers exposed to security_api ────────────────────────────────
 // These wrappers make the private security_api functions callable from tenant.rs.
+
+#[cfg(any(test, feature = "pg_test"))]
+#[pgrx::pg_schema]
+mod tests {
+    use pgrx::prelude::*;
+
+    #[pg_test]
+    fn test_tenant_role_lifecycle() {
+        // Mixed case must survive CREATE ROLE, catalog lookup, and revocation.
+        Spi::run(
+            "SELECT pg_ripple.create_tenant(tenant_name => 'TenantRegression', \
+             graph_iri => 'https://example.org/tenant-regression', quota_triples => 1000000)",
+        )
+        .unwrap();
+        assert_eq!(
+            Spi::get_one::<bool>(
+                "SELECT EXISTS (SELECT FROM pg_roles \
+                 WHERE rolname = 'ripple_tenant_TenantRegression' AND NOT rolcanlogin)",
+            )
+            .unwrap(),
+            Some(true)
+        );
+        assert_eq!(
+            Spi::get_one::<i64>(
+                "SELECT quota_triples FROM _pg_ripple.tenants \
+                 WHERE tenant_name = 'TenantRegression'",
+            )
+            .unwrap(),
+            Some(1000000)
+        );
+        Spi::run("SELECT pg_ripple.drop_tenant('TenantRegression')").unwrap();
+        assert_eq!(
+            Spi::get_one::<bool>(
+                "SELECT NOT EXISTS (SELECT FROM pg_policy p JOIN pg_roles r \
+                 ON r.oid = ANY(p.polroles) WHERE r.rolname = 'ripple_tenant_TenantRegression')",
+            )
+            .unwrap(),
+            Some(true)
+        );
+        Spi::run("DROP ROLE \"ripple_tenant_TenantRegression\"").unwrap();
+    }
+
+    #[pg_test(
+        error = "PT701: create_tenant: invalid tenant name 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'; use only ASCII letters, digits, and underscores (max 49 chars)"
+    )]
+    fn test_tenant_role_name_too_long() {
+        super::create_tenant(&"a".repeat(50), "https://example.org/too-long", 0);
+    }
+}

@@ -51,25 +51,29 @@
 
 ## 第 1 步 —— 注册租户
 
+命名参数为 `tenant_name`、`graph_iri` 和 `quota_triples`。租户名称仅允许 ASCII 字母、数字及下划线，最长 49 个字符。函数创建名为 `ripple_tenant_<tenant_name>` 的 `NOLOGIN` 角色；PostgreSQL 将 `pg_` 前缀保留给系统角色。
+
 `create_tenant()` 将命名图注册为租户并为其分配三元组计数配额。注册后，每次插入该图都会根据配额进行检查；超额插入引发 `PT530`。
 
 ```sql
 SELECT pg_ripple.create_tenant(
+    tenant_name  := 'acme',
     graph_iri    := 'https://example.org/tenants/acme',
-    triple_quota := 1_000_000
+    quota_triples := 1_000_000
 );
 
 SELECT pg_ripple.create_tenant(
+    tenant_name  := 'globex',
     graph_iri    := 'https://example.org/tenants/globex',
-    triple_quota := 250_000
+    quota_triples := 250_000
 );
 ```
 
 您可以随时列出当前使用情况：
 
 ```sql
-SELECT graph_iri, triple_count, triple_quota,
-       round(100.0 * triple_count / triple_quota, 1) AS pct_used
+SELECT graph_iri, triple_count, quota,
+       round(100.0 * triple_count / NULLIF(quota, 0), 1) AS pct_used
 FROM pg_ripple.tenant_stats()
 ORDER BY pct_used DESC;
 ```

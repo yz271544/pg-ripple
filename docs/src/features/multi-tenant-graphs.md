@@ -51,25 +51,32 @@ If you only need *labelled* partitioning without isolation (e.g. "this graph is 
 
 ## Step 1 — Register tenants
 
+Use `tenant_name`, `graph_iri`, and `quota_triples` as the named arguments.
+Tenant names contain ASCII letters, digits, and underscores (up to 49 characters).
+The function creates a `NOLOGIN` role named `ripple_tenant_<tenant_name>`;
+PostgreSQL reserves the `pg_` prefix for system roles.
+
 `create_tenant()` registers a named graph as a tenant and assigns it a triple-count quota. After registration, every insert into that graph is checked against the quota; an over-quota insert raises `PT530`.
 
 ```sql
 SELECT pg_ripple.create_tenant(
+    tenant_name  := 'acme',
     graph_iri    := 'https://example.org/tenants/acme',
-    triple_quota := 1_000_000
+    quota_triples := 1_000_000
 );
 
 SELECT pg_ripple.create_tenant(
+    tenant_name  := 'globex',
     graph_iri    := 'https://example.org/tenants/globex',
-    triple_quota := 250_000
+    quota_triples := 250_000
 );
 ```
 
 You can list current usage at any time:
 
 ```sql
-SELECT graph_iri, triple_count, triple_quota,
-       round(100.0 * triple_count / triple_quota, 1) AS pct_used
+SELECT graph_iri, triple_count, quota,
+       round(100.0 * triple_count / NULLIF(quota, 0), 1) AS pct_used
 FROM pg_ripple.tenant_stats()
 ORDER BY pct_used DESC;
 ```
