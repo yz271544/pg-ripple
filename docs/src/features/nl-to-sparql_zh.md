@@ -69,7 +69,7 @@ SELECT pg_reload_conf();
 3. **少样本示例**：`_pg_ripple.llm_examples` 中的任何行都作为问题/SPARQL 对包含在内。
 4. **LLM 调用**：提示以 `temperature = 0.0` 发送到 `/v1/chat/completions`。
 5. **提取**：从响应中提取 SPARQL 字符串并去除任何 markdown 围栏。
-6. **验证**：`spargebra` 解析查询。如果解析失败，则引发 PT702，以便调用者可以处理错误。
+6. **验证**：先应用普通查询的已注册前缀策略。若模型遗漏标准词汇表前缀声明（`rdf`、`rdfs`、`owl`、`xsd`、`skos`、`dcterms`、`schema`、`foaf`），则解析这些前缀，并在返回的查询中展开为完整 IRI。查询中的显式声明优先；未知业务前缀或其他语法错误仍引发 PT702。此补全仅用于生成的查询，普通 SPARQL 仍遵循配置的前缀策略。
 
 ## 添加少样本示例
 

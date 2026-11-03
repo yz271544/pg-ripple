@@ -69,7 +69,7 @@ For each call to `sparql_from_nl(question)`:
 3. **Few-shot examples**: any rows in `_pg_ripple.llm_examples` are included as question/SPARQL pairs.
 4. **LLM call**: the prompt is sent to `/v1/chat/completions` with `temperature = 0.0`.
 5. **Extraction**: the SPARQL string is extracted from the response and stripped of any markdown fencing.
-6. **Validation**: `spargebra` parses the query. If parsing fails, PT702 is raised so callers can handle the error.
+6. **Validation**: the normal registered-prefix policy is applied. If the generated query omits standard vocabulary declarations (`rdf`, `rdfs`, `owl`, `xsd`, `skos`, `dcterms`, `schema`, `foaf`), these are resolved and materialized as full IRIs in the returned query. Explicit declarations take precedence. Unknown domain prefixes and other syntax errors still raise PT702. This recovery applies only to generated queries; ordinary SPARQL retains its configured prefix policy.
 
 ## Adding Few-Shot Examples
 

@@ -22,6 +22,8 @@
 use pgrx::prelude::*;
 use spargebra::SparqlParser;
 
+mod generated_query;
+
 // ─── LLM endpoint call ────────────────────────────────────────────────────────
 
 /// The canned SPARQL response returned when the endpoint is `'mock'`.
@@ -58,7 +60,8 @@ fn call_llm_endpoint(
                 "content": "You are a SPARQL query generator. \
                     Given a natural-language question and a graph schema, \
                     output ONLY a valid SPARQL 1.1 SELECT query with no explanation, \
-                    markdown, or extra text."
+                    markdown, or extra text. Use full IRIs in angle brackets or \
+                    explicitly declare every namespace with PREFIX."
             },
             {
                 "role": "user",
@@ -292,7 +295,7 @@ fn build_bundle_metadata() -> String {
 
     let pred_list = bundle_labels
         .iter()
-        .map(|(_, short, _)| format!("  {short}"))
+        .map(|(iri, short, _)| format!("  <{iri}> ({short})"))
         .collect::<Vec<_>>()
         .join("\n");
 
@@ -427,13 +430,15 @@ pub fn sparql_from_nl(question: &str) -> String {
         )
     });
 
-    // Validate parsability.
-    if let Err(e) = SparqlParser::new().parse_query(&sparql) {
+    // Use the same registered-prefix policy as ordinary SPARQL execution.
+    let sparql = crate::sparql::parse::preprocess_query(&sparql);
+    // Normalize omitted standard vocabulary prefixes in generated text only.
+    let sparql = generated_query::normalize_generated_query(&sparql).unwrap_or_else(|e| {
         pgrx::error!(
             "LLM-generated SPARQL query failed to parse (PT702): {e}; \
              query text: {sparql}"
         );
-    }
+    });
 
     sparql
 }
